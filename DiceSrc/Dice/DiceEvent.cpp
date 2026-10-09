@@ -2850,14 +2850,19 @@ int DiceEvent::InnerOrder() {
 	}
 	else if (pref3 == "log") {
 		intMsgCnt += 3;
-		string_view strPara{ readPara() };
+		readSkipSpace();
+		//子指令起点，供省略空格的写法（如`.log new日志名`）回退，日志名统一交由readFileName读取
+		const size_t intBeginSub{ intMsgCnt };
+		const string_view strPara{ readPara() };
 		if (strPara.empty()) {
 			replyHelp("log");
 		}
-		else if (strPara == "new") {
+		else if (strPara.substr(0, 3) == "new") {
+			intMsgCnt = intBeginSub + 3;
 			sessions.get(fromChat)->log_new(this);
 		}
-		else if (strPara == "on") {
+		else if (strPara.substr(0, 2) == "on") {
+			intMsgCnt = intBeginSub + 2;
 			sessions.get(fromChat)->log_on(this);
 		}
 		else if (strPara == "off") {
@@ -4807,7 +4812,10 @@ std::string_view DiceEvent::readFileName(){
 		&& strMsg[intMsgCnt] != '/' && strMsg[intMsgCnt] != '\\'){
 		intMsgCnt++;
 	}
-	return { strMsg.c_str() + intBegin, intMsgCnt - intBegin };
+	//忽略名称末尾的空格
+	size_t intEnd{ intMsgCnt };
+	while (intEnd > intBegin && isspace(static_cast<unsigned char>(strMsg[intEnd - 1])))intEnd--;
+	return { strMsg.c_str() + intBegin, intEnd - intBegin };
 }
 int DiceEvent::readChat(chatInfo& ct, bool isReroll)
 {
