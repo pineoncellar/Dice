@@ -34,6 +34,7 @@ logs/                   运行日志（dicedriver.log 与 dice-<QQ>.log）
 | `<工作区>\build\` | 中间产物（CMake、对象文件、vcpkg 缓存与日志） |
 | `<工作区>\data\` | Dice 数据目录（`Dice<QQ>\`）与驱动状态（最后发言表、禁言到期表） |
 | `<工作区>\*.bat` | `build-dicedriver.bat`（构建本目录）、`start-dicedriver.bat`（启动） |
+| `<工作区>\build-portable.ps1` | 组装便携包：把本目录 + 两份 DLL + 一份 embeddable CPython 打成一个能拷到**没有开发环境**的机器上直接跑的目录（详见下节） |
 
 路径关系写在 `dicedriver.toml` 里（都是相对本文件的路径）：`dice_dll` 与 `shim_dll` 指向
 `../output`，`root_dir` 与 `state_dir` 指向 `../data`，日志仍留在本目录的 `logs/`。
@@ -79,6 +80,21 @@ OneBot 端：
 - `root_dir` 必须能用本机 ANSI 代码页表示（Dice 用 `std::filesystem::path` 读它），请避免中文路径。
 - Dice 自身配置（主人、`config:` 下的开关等）在 `<root_dir>/Dice<QQ>/conf/console.yaml`。
 - 想用管理指令：先把主人 QQ 写进该文件的 `master:`；`.system reload|remake|die` 需主人权限。
+
+## 便携包：搬到没有开发环境的机器
+
+目标机不需要 Python、venv、VS2022、编译器或 VC++ 运行库。在开发机上执行（要求 `output\` 下两份 DLL 与本目录的 `.venv` 都已就绪，即先跑过 `build-dicesrc.bat` 和 `build-dicedriver.bat`）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File build-portable.ps1        :: -> <工作区>\portable\Dice\
+powershell -ExecutionPolicy Bypass -File build-portable.ps1 -Zip   :: 另出 portable\Dice-portable.zip
+```
+
+产出目录由 `runtime\`（embeddable CPython 3.11 + 随包的 websockets）、`DiceDriver\`（本目录的 `dicedriver` 包）、`Diceki\`（两份 DLL 与 `dicedriver.toml` 放在一起）、`data\`（空数据目录，可放入旧的 `Dice<QQ>\`）以及 `start-dicedriver-portable.bat`、`README-portable.txt` 组成；整个目录可任意挪动、整个拷走。
+
+配置被放到 DLL 旁边，所以在生成时脚本会把配置里 `dice_dll`/`shim_dll` 的 `../output` 前缀改写成同目录的 `.`（`[log]` 的 `logs/…` 也以配置为基准，日志因此落在 `Diceki\logs\`），并检查这两项确实指向包内的文件。这一步同样不需要改源码：`config.py` 本来就是把相对路径解析到配置文件自身所在目录，自动重启也传的是绝对 `--config` 路径。
+
+不用"连 `.venv` 一起拷"：venv 不可重定位，`pyvenv.cfg` 里记着创建时解释器的绝对路径。可选参数见脚本头部注释与 `DiceSrc/docs/使用文档.md` §4.2。
 
 ## 与文档契约的偏差/实现选择（供审阅）
 
