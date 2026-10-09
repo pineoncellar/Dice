@@ -1659,7 +1659,10 @@ void DiceModManager::loadPlugin(ResList& res) {
 					err << "task_kill类型错误(" + string(LuaTypes[lua_type(L, -1)]) + "):" + file;
 					continue;
 				}
-				for (auto& [key, val] : lua_to_table(L).as_dict()) {
+				// 状态：[修复] MSVC 不延长 lua_to_table() 返回的临时量，
+				// 直接迭代 as_dict() 读到的是已析构的栈内存，键名和迭代次数都是随机的
+				auto tasks{ lua_to_table(L) };
+				for (auto& [key, val] : tasks.as_dict()) {
 					taskcall[key] = { {"file",file},{"func",val} };
 					++cntTask;
 				}
