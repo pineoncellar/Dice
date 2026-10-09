@@ -1614,6 +1614,11 @@ void DiceModManager::loadPlugin(ResList& res) {
 		}
 		string file{ getNativePathString(pathFile) };
 		LuaState L(file.c_str());
+		if (!L) {
+			// 状态：[跳过] state 已置空，继续拿去 lua_newtable 会空指针崩溃
+			err << "加载失败,已跳过:" + pathFile.filename().u8string();
+			continue;
+		}
 		lua_newtable(L);
 		lua_setglobal(L, "msg_order");
 		lua_newtable(L);
@@ -1672,6 +1677,7 @@ void DiceModManager::loadPlugin(ResList& res) {
 
 void DiceMod::loadLua() {
 	LuaState L;
+	if (!L)return; // 状态：[防御] state 为空时后面 lua_newtable 会空指针崩
 	UTF8Luas.insert(L);
 	ShowList err;
 	for (auto& file : luaFiles) {
