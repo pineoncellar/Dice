@@ -1118,12 +1118,14 @@ void DiceModManager::build() {
 		clock_events.clear();
 		hook_events.clear();
 		unordered_set<string> cycle;
+		// 状态：[延后] 先记 id，遍历 global_events 期间起线程会踩到 global_events[]
+		vector<string> firstCycle;
 		for (auto& [id, eve] : global_events) {
 			eve->at("id") = id;
 			auto trigger{ eve->get_obj("trigger") };
 			if (trigger->has("cycle")) {
 				if (!cycle_events.count(id)) {
-					call_cycle_event(id);
+					firstCycle.push_back(id);
 				}
 				cycle.insert(id);
 			}
@@ -1144,6 +1146,17 @@ void DiceModManager::build() {
 			}
 		}
 		cycle_events.swap(cycle);
+		// 状态：[不阻塞] 启动期 Enabled 为 false，action 本就被守卫挡掉，只剩登记定时器；
+		// 运行期重载时 action 可能是会做网络请求的 mod 脚本，丢到分离线程，别顶住调用方
+		for (const auto& id : firstCycle) {
+			if (Enabled) {
+				std::thread th{ &DiceModManager::call_cycle_event, this, id };
+				th.detach();
+			}
+			else {
+				call_cycle_event(id);
+			}
+		}
 	}
 	if (!resLog.empty()) {
 		resLog << "模块加载完毕√";
