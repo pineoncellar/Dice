@@ -36,16 +36,19 @@
 /.vscode
 /build
 /driver/build
-/Dice/Release
-/Dice/Debug
-/Dice/x64
+/DiceSrc/Dice/Release
+/DiceSrc/Dice/Debug
+/DiceSrc/Dice/x64
 /Release
 /packages
-/docs/html
 /Debug
 /Win32
 /x64
 /x86
 /w4123.Dice.dir
 
-/docs
+# workspace layout (see DiceSrc/docs/使用文档.md)
+/DiceSrc/docs
+/build
+/output
+/data

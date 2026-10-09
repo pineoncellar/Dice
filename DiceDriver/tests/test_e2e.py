@@ -15,12 +15,13 @@ import pytest
 
 from fake_onebot import BOT_QQ, GROUP, MASTER_QQ, FakeOneBot
 
-ROOT = Path(__file__).resolve().parent.parent
-DICE_DLL = Path(os.environ.get("DICE_DLL", r"D:\dice-build\Release\w4123.Dice.windows.amd64.dll"))
-SHIM = ROOT / "bin" / "dd_shim.dll"
+ROOT = Path(__file__).resolve().parent.parent          # <workspace>\DiceDriver
+WS = ROOT.parent                                       # workspace root
+DICE_DLL = Path(os.environ.get("DICE_DLL", WS / "output" / "w4123.Dice.windows.amd64.dll"))
+SHIM = WS / "output" / "dd_shim.dll"
 
 pytestmark = pytest.mark.skipif(not (DICE_DLL.is_file() and SHIM.is_file()),
-                                reason="needs the built Dice DLL and bin/dd_shim.dll")
+                                reason="needs output\\w4123.Dice.windows.amd64.dll and output\\dd_shim.dll")
 
 
 @pytest.fixture(scope="module")

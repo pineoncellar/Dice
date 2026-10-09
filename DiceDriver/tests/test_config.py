@@ -43,5 +43,8 @@ def test_example_config_loads(tmp_path):
     from pathlib import Path
     example = Path(__file__).resolve().parent.parent / "dicedriver.example.toml"
     cfg = config.load(example)
-    assert cfg.driver.shim_dll == "bin/dd_shim.dll"
+    workspace = example.parent.parent
+    assert cfg.resolve(cfg.driver.shim_dll) == workspace / "output" / "dd_shim.dll"
+    assert cfg.resolve(cfg.driver.dice_dll).parent == workspace / "output"
+    assert cfg.resolve(cfg.driver.root_dir) == workspace / "data"
     assert cfg.resolve("x").parent == example.parent

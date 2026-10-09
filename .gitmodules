@@ -1,10 +1,10 @@
 [submodule "vcpkg"]
-	path = vcpkg
+	path = DiceSrc/vcpkg
 	url = https://github.com/microsoft/vcpkg
 	branch = master
 [submodule "libiconv"]
-	path = libiconv
+	path = DiceSrc/libiconv
 	url = https://github.com/w4123/libiconv-android-prebuilt
 [submodule "DiceWebUI"]
-	path = DiceWebUI
+	path = DiceSrc/DiceWebUI
 	url = https://github.com/Dice-Developer-Team/DiceWebUI.git

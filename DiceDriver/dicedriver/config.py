@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -15,10 +16,10 @@ class ConfigError(ValueError):
 @dataclass
 class DriverCfg:
     bot_qq: int = 0  # 0 = take it from the OneBot connection
-    dice_dll: str = "bin/w4123.Dice.windows.amd64.dll"
-    shim_dll: str = "bin/dd_shim.dll"
-    root_dir: str = "data"  # Dice creates <root_dir>/Dice<QQ>/ ; must be ANSI-code-page safe
-    state_dir: str = "data/driver-state"
+    dice_dll: str = "../output/w4123.Dice.windows.amd64.dll"
+    shim_dll: str = "../output/dd_shim.dll"
+    root_dir: str = "../data"  # Dice creates <root_dir>/Dice<QQ>/ ; must be ANSI-code-page safe
+    state_dir: str = "../data/driver-state"
     pool_size: int = 16  # worker threads that call into Dice
     startup_timeout_s: int = 60
 
@@ -89,7 +90,10 @@ class Config:
 
     def resolve(self, p: str) -> Path:
         path = Path(p)
-        return path if path.is_absolute() else (self.base_dir / path)
+        if not path.is_absolute():
+            path = self.base_dir / path
+        # normalise ".." lexically (no symlink resolution: configured paths may not exist yet)
+        return Path(os.path.normpath(path))
 
 
 _SECTIONS = {

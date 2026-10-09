@@ -1,6 +1,11 @@
 # Dice!
 QQ Dice Robot For TRPG Based on CoolQ/Mirai/XQ
 
+> 本目录位于工作区 `DiceSrc\` 下。构建产物输出到工作区 `output\`，所有中间产物在 `build\`。
+> **推荐直接用工作区根目录的 `build-dicesrc.bat` 构建**（或 `DiceSrc\build-dice.ps1`），它会处理好这些路径。
+> 完整的构建与运行说明见 [`docs\使用文档.md`](docs/使用文档.md)。
+> 下面几节是上游原始说明，仍然适用（在本目录里直接 `cmake .` 也可以）。
+
 [![License](https://img.shields.io/github/license/Dice-Developer-Team/Dice.svg)](http://www.gnu.org/licenses)
 [![Downloads](https://img.shields.io/github/downloads/Dice-Developer-Team/dice/total.svg)](https://github.com/Dice-Developer-Team/Dice/releases)
 [![GitHub contributors](https://img.shields.io/github/contributors/Dice-Developer-Team/dice.svg)](https://github.com/Dice-Developer-Team/Dice/graphs/contributors)

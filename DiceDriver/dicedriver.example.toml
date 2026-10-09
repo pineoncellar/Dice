@@ -1,12 +1,12 @@
 # DiceDriver 配置 —— 复制为 dicedriver.toml 后修改（dicedriver.toml 已被 .gitignore 忽略）。
-# 相对路径均相对于本文件所在目录。
+# 相对路径均相对于本文件所在目录，常用路径：../output（编译产物）、../data（骰娘数据）。
 
 [driver]
 bot_qq        = 0                                       # 0 = 以 OneBot 连接上报的账号为准；填写后会校验
-dice_dll      = "D:/dice-build/Release/w4123.Dice.windows.amd64.dll"
-shim_dll      = "bin/dd_shim.dll"                       # 由 build-shim.ps1 生成
-root_dir      = "data"                                  # Dice 在其下建 Dice<QQ>/；须能用 ANSI 代码页表示（避免中文路径）
-state_dir     = "data/driver-state"                     # 最后发言表、全员禁言到期表
+dice_dll      = "../output/w4123.Dice.windows.amd64.dll" # 由 根目录\build-dicesrc.bat 生成
+shim_dll      = "../output/dd_shim.dll"                 # 由 根目录\build-dicedriver.bat 生成
+root_dir      = "../data"                               # Dice 在其下建 Dice<QQ>/；须能用 ANSI 代码页表示（避免中文路径）
+state_dir     = "../data/driver-state"                  # 最后发言表、全员禁言到期表
 pool_size     = 16                                      # 调用 Dice 的工作线程数
 startup_timeout_s = 60
 

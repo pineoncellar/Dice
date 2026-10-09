@@ -1,14 +1,15 @@
 # DiceDriver (Python)
 
 把 x64 的 `w4123.Dice` DLL 接到 **OneBot 11**（正向 / 反向 WebSocket）的宿主程序。
-接口取舍与行为约定见 [`../docs/DiceDriver-interface-duties.md`](../docs/DiceDriver-interface-duties.md)（v3，已确认）。
+接口取舍与行为约定见 [`DiceSrc/docs/DiceDriver-interface-duties.md`](../DiceSrc/docs/DiceDriver-interface-duties.md)（v3，已确认）；
+整个工作区的构建与启动方式见 [`DiceSrc/docs/使用文档.md`](../DiceSrc/docs/使用文档.md)。
 
 ## 结构
 
 ```
 shim/dd_shim.cpp        原生垫片(x64, MSVC /MT)：持有 Dice 要求的 C++ ABI API 表，
                         39 个 thunk 统一转发给 Python 的一个回调
-build-shim.ps1          编译垫片 -> bin/dd_shim.dll
+build-shim.ps1          编译垫片 -> <工作区>\output\dd_shim.dll
 dicedriver/
   config.py             dicedriver.toml 读取与校验
   logs.py               主日志(含 TRACE) + Dice DebugLog 单独文件，异步写盘
@@ -21,13 +22,35 @@ dicedriver/
   notify.py             DebugMsg 合并限流投递 / DiceHeartbeat 异步 POST
   app.py, __main__.py   装配、生命周期、Reload/Remake/Killme
 tests/                  单元测试 + 端到端（真 Dice DLL + 脚本化的假 OneBot）
+logs/                   运行日志（dicedriver.log 与 dice-<QQ>.log）
 ```
+
+工作区里与本目录相关的其他位置：
+
+| 位置 | 内容 |
+|---|---|
+| `<工作区>\output\` | 编译产物：`w4123.Dice.windows.amd64.dll`、`dd_shim.dll` |
+| `<工作区>\build\` | 中间产物（CMake、对象文件、vcpkg 缓存与日志） |
+| `<工作区>\data\` | Dice 数据目录（`Dice<QQ>\`）与驱动状态（最后发言表、禁言到期表） |
+| `<工作区>\*.bat` | `build-dicedriver.bat`（构建本目录）、`start-dicedriver.bat`（启动） |
+
+路径关系写在 `dicedriver.toml` 里（都是相对本文件的路径）：`dice_dll` 与 `shim_dll` 指向
+`../output`，`root_dir` 与 `state_dir` 指向 `../data`，日志仍留在本目录的 `logs/`。
 
 为什么需要垫片：Dice 的宿主接口是 C++ ABI（`const std::string&`、`const std::set<long long>&`、
 `unordered_map<string, void*>`），Python/ctypes 造不出这些对象，所以由一个与 Dice 同工具链同 CRT 的
 小 DLL 承担 ABI，再用 `(api, ints, text, out, cap)` 这种纯 C 形式转给 Python。
 
 ## 使用
+
+最简单的方式是用工作区根目录的批处理（它会把路径都算好）：
+
+```bat
+build-dicedriver.bat     :: 建虚拟环境、装依赖、编译垫片 DLL
+start-dicedriver.bat     :: 启动驱动（读 dicedriver.toml）
+```
+
+等价的手动步骤：
 
 ```powershell
 # 1) 编译垫片（需要 VS2022 的 x64 工具链；会自动找 vswhere，也可设 DD_VCVARS64）
@@ -37,12 +60,14 @@ powershell -ExecutionPolicy Bypass -File build-shim.ps1
 .venv\Scripts\python.exe -m pip install -e ".[dev]"
 
 # 3) 配置
-copy dicedriver.example.toml dicedriver.toml     # 修改 dice_dll / onebot 段 / notify 等
+copy dicedriver.example.toml dicedriver.toml     # 修改 onebot 段 / notify 等
 
 # 4) 检查并运行
 .venv\Scripts\python.exe -m dicedriver --check
 .venv\Scripts\python.exe -m dicedriver
 ```
+
+Python 部分的改动不需要重新构建，直接重启驱动即可。
 
 OneBot 端：
 - 正向（`mode = "forward"`）：OneBot 实现开启正向 WS 服务，`url` 指向它；`access_token` 以 `Authorization: Bearer` 发送。
@@ -70,6 +95,8 @@ OneBot 端：
 ## 测试
 
 ```powershell
-.venv\Scripts\python.exe -m pytest tests -q          # 全部（端到端需 Dice DLL 与 bin\dd_shim.dll，缺则自动跳过）
+.venv\Scripts\python.exe -m pytest tests -q          # 全部（端到端需 output 下的 Dice DLL 与 dd_shim.dll，缺则自动跳过）
 .venv\Scripts\python.exe -m pytest tests -q -k "not e2e"   # 仅单元测试
 ```
+
+端到端测试默认使用 `<工作区>\output\` 下的产物，可用环境变量 `DICE_DLL` 指定其他 DLL。

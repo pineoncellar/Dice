@@ -12,7 +12,7 @@ from fake_onebot import BOT_QQ, MASTER_QQ, FakeOneBot
 from test_e2e import DICE_DLL, ROOT, SHIM
 
 pytestmark = pytest.mark.skipif(not (DICE_DLL.is_file() and SHIM.is_file()),
-                                reason="needs the built Dice DLL and bin/dd_shim.dll")
+                                reason="needs output\\w4123.Dice.windows.amd64.dll and output\\dd_shim.dll")
 
 
 def _kill_by_cmdline(fragment: str) -> None:
