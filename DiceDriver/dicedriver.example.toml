@@ -1,0 +1,58 @@
+# DiceDriver 配置 —— 复制为 dicedriver.toml 后修改（dicedriver.toml 已被 .gitignore 忽略）。
+# 相对路径均相对于本文件所在目录。
+
+[driver]
+bot_qq        = 0                                       # 0 = 以 OneBot 连接上报的账号为准；填写后会校验
+dice_dll      = "D:/dice-build/Release/w4123.Dice.windows.amd64.dll"
+shim_dll      = "bin/dd_shim.dll"                       # 由 build-shim.ps1 生成
+root_dir      = "data"                                  # Dice 在其下建 Dice<QQ>/；须能用 ANSI 代码页表示（避免中文路径）
+state_dir     = "data/driver-state"                     # 最后发言表、全员禁言到期表
+pool_size     = 16                                      # 调用 Dice 的工作线程数
+startup_timeout_s = 60
+
+[onebot]
+mode          = "forward"                               # forward = 驱动连 OneBot 的正向 WS；reverse = 驱动监听、OneBot 反向连入
+# --- forward ---
+url           = "ws://127.0.0.1:3001"
+reconnect_min_s = 1.0
+reconnect_max_s = 30.0
+# --- reverse ---
+host          = "127.0.0.1"
+port          = 6700
+path          = "/"
+# --- common ---
+access_token  = ""
+call_timeout_s   = 10.0
+upload_timeout_s = 60.0
+send_format   = "array"                                 # array = 把 CQ 码转为消息段数组再发；string = 原样发送 CQ 字符串
+forward_self_messages = false                           # 是否把骰娘自己发的消息也交给 Dice（需 Dice 的 ListenSelfEcho/ListenGroupEcho）
+friend_greeting = true                                  # 同意好友申请后，发送 Dice 的欢迎语
+
+[log]
+file          = "logs/dicedriver.log"
+dice_log_file = "logs/dice-{qq}.log"                    # Dice 的 DebugLog 原文单独落盘
+level         = "debug"                                 # trace | debug | info | warn | error
+max_size_mb   = 64
+files         = 10
+console       = true
+
+[notify]                                                # 对应 DebugMsg
+mode          = "console"                               # off | console | private | group
+targets       = []                                      # private=QQ 号，group=群号，可多个
+batch_window_ms = 1000
+rate_limit    = 20                                      # 每分钟批数上限
+
+[heartbeat]                                             # 对应 DiceHeartbeat（Dice 侧需在 clock 里配置 heartbeat 任务）
+enabled       = false
+url           = "http://127.0.0.1:8787/heartbeat"
+content_type  = "application/x-www-form-urlencoded"
+timeout_ms    = 300
+# headers     = { "X-Token" = "xxx" }
+
+[cache]
+member_ttl_s       = 60
+nick_ttl_s         = 600
+friend_ttl_s       = 300
+group_refresh_s    = 600
+last_speak_flush_s = 60
+flag_ttl_s         = 259200
