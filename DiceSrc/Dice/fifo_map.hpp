@@ -145,6 +145,18 @@ template <
     /// copy constructor
     fifo_map(const fifo_map &f) : m_keys(f.m_keys), m_compare(&m_keys, f.m_compare.m_timestamp), m_map(f.m_map.begin(), f.m_map.end(), m_compare) {}
 
+    /// copy assignment
+    // 状态：[修复] 隐式赋值会把 m_compare 里指向源对象 m_keys 的指针一起拷过来，
+    // 源对象（尤其是临时对象）一析构即成野指针，这里按拷贝构造重新绑定
+    fifo_map &operator=(const fifo_map &f)
+    {
+        if (this == &f)return *this;
+        m_keys = f.m_keys;
+        m_compare = Compare(&m_keys, f.m_compare.m_timestamp);
+        m_map = internal_map_type(f.m_map.begin(), f.m_map.end(), m_compare);
+        return *this;
+    }
+
     /// constructor for a range of elements
     template<class InputIterator>
     fifo_map(InputIterator first, InputIterator last)
