@@ -60,9 +60,12 @@ END
 // Version
 //
 
+// Version numbers come from DiceVersion.h (single source of truth); do not hardcode them here.
+#include "DiceVersion.h"
+
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 2,4,0,0
- PRODUCTVERSION 2,4,0,0
+ FILEVERSION DICE_VERSION_MAJOR,DICE_VERSION_MINOR,DICE_VERSION_PATCH,DICE_BUILD_NUMBER
+ PRODUCTVERSION DICE_VERSION_MAJOR,DICE_VERSION_MINOR,DICE_VERSION_PATCH,DICE_BUILD_NUMBER
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
  FILEFLAGS 0xbL
@@ -79,12 +82,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "Dice! Developer Group"
             VALUE "FileDescription", "Dice! Main Dll"
-            VALUE "FileVersion", "2.6.6.635"
+            VALUE "FileVersion", DICE_VERSION_TEXT
             VALUE "InternalName", "app.dll"
             VALUE "LegalCopyright", "Copyright (C) 2020-2022 ËÝä§ & °²ÑÐÉ«Shiki"
             VALUE "OriginalFilename", "app.dll"
             VALUE "ProductName", "Dice!"
-            VALUE "ProductVersion", "2.6.6.635"
+            VALUE "ProductVersion", DICE_VERSION_TEXT
         END
     END
     BLOCK "VarFileInfo"

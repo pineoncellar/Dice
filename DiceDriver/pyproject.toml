@@ -1,6 +1,6 @@
 [project]
 name = "dicedriver"
-version = "0.1.0"
+dynamic = ["version"]
 description = "OneBot 11 host for the Dice! plugin DLL (w4123.Dice, x64)"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -14,6 +14,10 @@ dicedriver = "dicedriver.__main__:main"
 
 [tool.setuptools]
 packages = ["dicedriver"]
+
+# 版本号单一来源：dicedriver/__init__.py 的 __version__
+[tool.setuptools.dynamic]
+version = {attr = "dicedriver.__version__"}
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

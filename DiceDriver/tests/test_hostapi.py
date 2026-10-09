@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from dicedriver import config
+from dicedriver import __version__, config
 from dicedriver.hostapi import DROPPED, HostApi
 from dicedriver.state import State
 
@@ -87,7 +87,8 @@ def test_dropped_apis_have_no_handler(env):
 
 def test_driver_ver_and_tinyid_and_update(env):
     api = env[0]
-    assert b"OneBot11" in call(api, "_DriverVer").out
+    ver = call(api, "_DriverVer").out.decode()
+    assert "DiceDriver-py" in ver and __version__ in ver
     assert call(api, "GetTinyID", 100).ret == 0
     r = call(api, "DiceUpdate", text="2.7.1")
     assert r.ret == 1 and r.out

@@ -16,14 +16,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from . import logs
+from . import __version__, logs
 from .cq import cq_to_segments
 from .state import UNKNOWN, Member, State
 
 log = logging.getLogger("dd.api")
 dice_log = logging.getLogger("dice")
 
-DRIVER_VERSION = "DiceDriver-py v0.1 (OneBot11)"
+# 显示在 .bot 回执里的驱动版本；唯一来源是 dicedriver/__init__.py 的 __version__
+DRIVER_VERSION = f"DiceDriver-py v{__version__} by Pine"
 
 # Interfaces the project decided NOT to implement; they must stay absent from the table.
 DROPPED = frozenset({

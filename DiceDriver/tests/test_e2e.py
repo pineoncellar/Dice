@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from dicedriver import __version__
 from fake_onebot import BOT_QQ, GROUP, MASTER_QQ, FakeOneBot
 
 ROOT = Path(__file__).resolve().parent.parent          # <workspace>\DiceDriver
@@ -76,7 +77,7 @@ def test_group_bot_command_replies_with_driver_version(session):
     reply = _converse(fake, lambda: fake.group_message(".bot"), "send_group_msg", "DiceDriver-py")
     assert reply["group_id"] == GROUP
     text = "".join(seg["data"].get("text", "") for seg in reply["message"])
-    assert "OneBot11" in text
+    assert __version__ in text
 
 
 def test_private_bot_command_replies(session):

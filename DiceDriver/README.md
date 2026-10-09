@@ -21,6 +21,7 @@ dicedriver/
   events.py             OneBot 事件 -> Dice 的 eventXxx（按会话保序、工作线程池）
   notify.py             DebugMsg 合并限流投递 / DiceHeartbeat 异步 POST
   app.py, __main__.py   装配、生命周期、Reload/Remake/Killme
+  __init__.py           包版本号 __version__：.bot 回执里的驱动版本与打包版本都取自这里
 tests/                  单元测试 + 端到端（真 Dice DLL + 脚本化的假 OneBot）
 logs/                   运行日志（dicedriver.log 与 dice-<QQ>.log）
 ```
