@@ -49,21 +49,20 @@ namespace RandomGenerator
 #endif	
 	}
 	
-#if defined(__i386__) || defined(__x86_64__)
+	// Keep the engine function-local: a namespace-scope engine would be dynamically
+	// initialised in unspecified order relative to other translation units, and the global
+	// `console` already calls Randint() from its own dynamic initialiser
+	// (authkey_pub/authkey_pri). Reaching this point before the engine is constructed means
+	// drawing from a still-zero engine, which returns 0 forever - and the rejection loop in
+	// MSVC's uniform_int_distribution never accepts 0, so DllMain spins until the process
+	// is killed. Note MSVC defines neither __i386__ nor __x86_64__, so this used to be the
+	// global-engine branch on Windows.
 	int Randint(int lowest, int highest)
 	{
-		std::mt19937 gen(static_cast<unsigned int>(GetCycleCount()));
+		static std::mt19937 gen(static_cast<unsigned int>(GetCycleCount()));
 		std::uniform_int_distribution<int> dis(lowest, highest);
 		return dis(gen);
 	}
-#else
-	std::mt19937 gen(static_cast<unsigned int>(GetCycleCount()));
-	int Randint(int lowest, int highest)
-	{
-		std::uniform_int_distribution<int> dis(lowest, highest);
-		return dis(gen);
-	}
-#endif
 	std::string genKey(size_t len, Code mode) {
 		std::string res;
 		std::string charset;
