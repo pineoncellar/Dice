@@ -117,6 +117,18 @@ namespace Network
 #endif
 	}
 
+#ifdef _WIN32
+	// 状态：[防卡死] WinINet 默认超时长（连接 60 秒、收发 30 秒），对方不回包就会挂死调用方
+	void setWinINetTimeout(HINTERNET handle)
+	{
+		if (!handle)return;
+		DWORD timeoutMs{ 10000 };
+		InternetSetOptionA(handle, INTERNET_OPTION_CONNECT_TIMEOUT, &timeoutMs, sizeof(timeoutMs));
+		InternetSetOptionA(handle, INTERNET_OPTION_SEND_TIMEOUT, &timeoutMs, sizeof(timeoutMs));
+		InternetSetOptionA(handle, INTERNET_OPTION_RECEIVE_TIMEOUT, &timeoutMs, sizeof(timeoutMs));
+	}
+#endif
+
 	bool POST(const string& url, const string& postContent, const string& postHeader, std::string& des)
 	{
 		std::string strHeader = postHeader.empty() ? "Content-Type: application/x-www-form-urlencoded" : postHeader;
@@ -156,10 +168,12 @@ namespace Network
 		const char* acceptTypes[] = {"*/*", nullptr};
 
 		const HINTERNET hInternet = InternetOpenA(UserAgent.c_str(), INTERNET_OPEN_TYPE_PRECONFIG, nullptr, nullptr, 0);
+		setWinINetTimeout(hInternet);
 		const HINTERNET hConnect = InternetConnectA(hInternet, std::string(urlComponents.lpszHostName, urlComponents.dwHostNameLength).c_str(), urlComponents.nPort, nullptr, nullptr, 
 			INTERNET_SERVICE_HTTP, 0, 0);
 		const HINTERNET hRequest = HttpOpenRequestA(hConnect, "POST", (std::string(urlComponents.lpszUrlPath, urlComponents.dwUrlPathLength) + std::string(urlComponents.lpszExtraInfo, urlComponents.dwExtraInfoLength)).c_str(), "HTTP/1.1", nullptr, acceptTypes,
 			(urlComponents.nScheme == INTERNET_SCHEME_HTTPS ? INTERNET_FLAG_SECURE : 0), 0);
+		setWinINetTimeout(hRequest);
 		const BOOL res = HttpSendRequestA(hRequest, strHeader.c_str(), strHeader.length(), (void*)postContent.c_str(), postContent.length());
 
 
@@ -296,11 +310,13 @@ InternetClose:
 		const char* acceptTypes[] = {"*/*", nullptr};
 
 		const HINTERNET hInternet = InternetOpenA(DiceRequestHeader, INTERNET_OPEN_TYPE_PRECONFIG, nullptr, nullptr, 0);
+		setWinINetTimeout(hInternet);
 		const HINTERNET hConnect = InternetConnectA(hInternet, std::string(urlComponents.lpszHostName, urlComponents.dwHostNameLength).c_str(), urlComponents.nPort, nullptr, nullptr, 
 			INTERNET_SERVICE_HTTP, 0, 0);
 		const HINTERNET hRequest = HttpOpenRequestA(hConnect, "GET",
 			(std::string(urlComponents.lpszUrlPath, urlComponents.dwUrlPathLength) + std::string(urlComponents.lpszExtraInfo, urlComponents.dwExtraInfoLength)).c_str(),
 			"HTTP/1.1", nullptr, acceptTypes, (urlComponents.nScheme == INTERNET_SCHEME_HTTPS ? INTERNET_FLAG_SECURE : 0) | INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_RELOAD, 0);
+		setWinINetTimeout(hRequest);
 		const BOOL res = HttpSendRequestA(hRequest, nullptr, 0, nullptr, 0);
 
 
