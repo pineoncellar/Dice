@@ -233,6 +233,8 @@ public:
 	}
 	[[nodiscard]] std::filesystem::path log_path()const;
 	[[nodiscard]] bool is_logging() const { return logger.isLogging; }
+	//跑团状态(日志开关)变化时,向本桌绑定的每个聊天窗口广播hook=LogSwitch,并上报宿主
+	void notify_log_switch(const char* action);
 
 	//deck指令
 	dict_ci<DeckInfo>& get_deck() { return decks; }
@@ -279,3 +281,5 @@ public:
 	void over(chatInfo ct);
 };
 extern DiceSessionManager sessions;
+//把当前所有正在记录的聊天窗口上报给宿主(driver),供其在启动/重载后重建跑团状态
+void report_log_state_snapshot();

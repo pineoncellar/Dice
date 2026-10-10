@@ -750,6 +750,17 @@ LUADEF(getSelfData) {
 	luaL_setmetatable(L, "SelfData");
 	return 1;
 }
+//读取指定群聊是否正在跑团(即日志记录中)
+LUADEF(isLogging) {
+	bool logging{ false };
+	if (long long gid{ lua_to_int_or_zero(L, 1) }) {
+		if (auto game{ sessions.get_if(chatInfo{ 0, gid }) }) {
+			logging = game->is_logging();
+		}
+	}
+	lua_pushboolean(L, logging);
+	return 1;
+}
 LUADEF(getGroupConf) {
 	int top{ lua_gettop(L) };
 	if (top < 1)return 0;
@@ -1501,6 +1512,7 @@ void LuaState::regist() {
 		REGIST(loadLua)
 		REGIST(getDiceQQ)
 		REGIST(getDiceDir)
+		REGIST(isLogging)
 		REGIST(mkDirs)
 		REGIST(getSelfData)
 		REGIST(getGroupConf)

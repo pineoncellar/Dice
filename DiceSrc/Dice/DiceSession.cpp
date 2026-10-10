@@ -190,7 +190,64 @@ void DiceSession::ob_clr(DiceEvent* msg)
 	update();
 }
 
+/**
+ * 跑团(日志)状态上报,供宿主(driver)对外部应用(如麦bot)做消息门控
+ * 单行写入dice-<qq>.log; name可能含空格,故置于行尾,控制字符替换为空格
+ */
+static void report_log_state(const chatInfo& ct, const string& session, const char* action,
+	bool logging, const string& name) {
+	static auto sanitize = [](const string& s) {
+		string out{ s };
+		for (auto& c : out) {
+			if (static_cast<unsigned char>(c) < 0x20) c = ' ';
+		}
+		return out;
+	};
+	DD::debugLog(string("@dice.logstate v1 on=") + (logging ? "1" : "0")
+		+ " action=" + action
+		+ " session=" + sanitize(session)
+		+ " gid=" + to_string(ct.gid)
+		+ " uid=" + to_string(ct.uid)
+		+ " chid=" + to_string(ct.chid)
+		+ " name=" + sanitize(name));
+}
+
+void DiceSession::notify_log_switch(const char* action) {
+	for (const auto& ct : areas) {
+		//先上报宿主,避免被mod脚本的执行耗时拖住
+		report_log_state(ct, name, action, logger.isLogging, logger.name);
+		AttrObject eve{ AttrVars{
+			{"hook", "LogSwitch"},
+			{"action", action},
+			{"gid", ct.gid},
+			{"uid", ct.uid},
+			{"chid", ct.chid},
+			{"logging", AttrVar(logger.isLogging)},
+			{"log_name", logger.name},
+			{"log_file", logger.fileLog},
+			{"session", name},
+		} };
+		fmt->call_hook_event(eve);
+	}
+}
+
+void report_log_state_snapshot() {
+	size_t cnt{ 0 };
+	for (const auto& ct : LogList) {
+		auto game{ sessions.get_if(ct) };
+		if (!game)continue;
+		//以会话的真实状态上报: 陈旧条目会被自然纠正为off
+		report_log_state(ct, game->name, "snapshot", game->is_logging(),
+			game->get("log_name").to_str());
+		++cnt;
+	}
+	//终止行: 即使一份日志都没开也要发,宿主据此认定"快照之外皆未跑团"
+	DD::debugLog(string("@dice.logstate v1 action=snapshot-end count=") + to_string(cnt));
+}
+
 void DiceSession::log_new(DiceEvent* msg) {
+	bool wasLogging{ logger.isLogging };
+	string nameBefore{ logger.name };
 	std::error_code ec;
 	std::filesystem::create_directory(DiceDir / logger.dirLog, ec);
 	logger.tStart = time(nullptr);
@@ -200,6 +257,7 @@ void DiceSession::log_new(DiceEvent* msg) {
 	logger.fileLog = name + "_" + nameLog + ".txt";
 	logger.pathLog = DiceDir / logger.dirLog / UTF8toPath(logger.fileLog);
 	logger.isLogging = true;
+	if (wasLogging != logger.isLogging || nameBefore != logger.name)notify_log_switch("new");
 	//先发消息后插入
 	msg->replyMsg("strLogNew");
 	for (const auto& ct : areas) {
@@ -212,6 +270,8 @@ void DiceSession::log_on(DiceEvent* msg) {
 		log_new(msg);
 		return;
 	}
+	bool wasLogging{ logger.isLogging };
+	string nameBefore{ logger.name };
 	if (string nameLog{ msg->readFileName() }; !nameLog.empty() && nameLog != logger.name) {
 		logger.tStart = time(nullptr);
 		logger.name = nameLog;
@@ -224,6 +284,7 @@ void DiceSession::log_on(DiceEvent* msg) {
 	}
 	msg->set("log_name", logger.name);
 	logger.isLogging = true;
+	if (wasLogging != logger.isLogging || nameBefore != logger.name)notify_log_switch("on");
 	msg->replyMsg("strLogOn");
 	for (const auto& ct : areas) {
 		LogList.insert(ct);
@@ -239,7 +300,9 @@ void DiceSession::log_off(DiceEvent* msg) {
 		msg->replyMsg("strLogOffAlready");
 		return;
 	}
+	bool wasLogging{ logger.isLogging };
 	logger.isLogging = false;
+	if (wasLogging != logger.isLogging)notify_log_switch("off");
 	//先擦除后发消息
 	for (const auto& ct : areas) {
 		LogList.erase(ct);
@@ -252,11 +315,13 @@ void DiceSession::log_end(DiceEvent* msg) {
 		msg->replyMsg("strLogNullErr");
 		return;
 	}
+	bool wasLogging{ logger.isLogging };
 	for (const auto& ct : areas) {
 		LogList.erase(ct);
 	}
 	logger.isLogging = false;
 	logger.tStart = 0;
+	if (wasLogging != logger.isLogging)notify_log_switch("end");
 	if (std::filesystem::path pathFile(log_path()); !std::filesystem::exists(pathFile)) {
 		msg->replyMsg("strLogEndEmpty");
 		return;

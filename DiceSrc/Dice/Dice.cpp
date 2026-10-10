@@ -206,6 +206,8 @@ void readUserData(){
 	}
 	//读取房间记录
 	sessions.load();
+	//宿主据此重建跑团状态(供外部应用消息门控)
+	report_log_state_snapshot();
 	if (!log.empty()) {
 		log << "用户数据读取完毕";
 		DD::debugLog(printSTNow() + log.show());
