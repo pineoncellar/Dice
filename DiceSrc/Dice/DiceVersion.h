@@ -13,8 +13,8 @@
 
 // Semantic version. Bump these for a release; TAG is "p"/"beta1"/... or "" for a plain release.
 #define DICE_VERSION_MAJOR 1
-#define DICE_VERSION_MINOR 0
-#define DICE_VERSION_PATCH 2
+#define DICE_VERSION_MINOR 1
+#define DICE_VERSION_PATCH 0
 #define DICE_VERSION_TAG   "p"
 
 // Build number, formerly Dice_Build. The cloud heartbeat and module installs compare against it:
