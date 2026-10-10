@@ -19,6 +19,8 @@ DiceSessionManager sessions;
 std::recursive_mutex sessionMutex;
 #define LOCK_REC(ex) std::lock_guard<std::recursive_mutex> lock(ex) 
 unordered_set<chatInfo>LogList;
+//最近一次全量上报(启动快照)发出的时间,0=尚未发出(即门控尚未初始化)
+time_t tLogSnapshot{ 0 };
 
 const std::filesystem::path LogInfo::dirLog{ std::filesystem::path("user") / "log" };
 DiceSession::DiceSession(const string& s) : name(s), filePath(DiceDir / "user" / "session" / UTF8toPath(s + ".json")),
@@ -243,6 +245,7 @@ void report_log_state_snapshot() {
 	}
 	//终止行: 即使一份日志都没开也要发,宿主据此认定"快照之外皆未跑团"
 	DD::debugLog(string("@dice.logstate v1 action=snapshot-end count=") + to_string(cnt));
+	tLogSnapshot = time(nullptr);
 }
 
 void DiceSession::log_new(DiceEvent* msg) {

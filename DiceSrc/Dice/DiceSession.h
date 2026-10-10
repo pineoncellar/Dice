@@ -233,6 +233,8 @@ public:
 	}
 	[[nodiscard]] std::filesystem::path log_path()const;
 	[[nodiscard]] bool is_logging() const { return logger.isLogging; }
+	//日志创建时间,0=本桌从未开过日志(结束日志会归零)
+	[[nodiscard]] time_t log_start() const { return logger.tStart; }
 	//跑团状态(日志开关)变化时,向本桌绑定的每个聊天窗口广播hook=LogSwitch,并上报宿主
 	void notify_log_switch(const char* action);
 
@@ -283,3 +285,7 @@ public:
 extern DiceSessionManager sessions;
 //把当前所有正在记录的聊天窗口上报给宿主(driver),供其在启动/重载后重建跑团状态
 void report_log_state_snapshot();
+//跑团日志上报的窗口集合(启动快照与增量上报的门控依据),供.admin bridge查看
+extern unordered_set<chatInfo> LogList;
+//最近一次全量上报(启动快照)发出的时间,0=尚未发出(即门控尚未初始化)
+extern time_t tLogSnapshot;

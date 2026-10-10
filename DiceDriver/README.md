@@ -125,6 +125,14 @@ port    = 6701      # 可自定义；端口不与 [onebot] reverse 冲突即可
   不存在错位一条消息的窗口。
 - 因此 **Dice DLL 与驱动必须成对升级**：只有新的 DLL 才会发这份上报。
 
+排查门控是否已就绪：
+
+- Dice 侧：`.admin bridge this state` 查看当前窗口（`g[群号]` 换群聊、省略 g 按私聊 QQ 号），
+  `.admin bridge list` 列出上报集合里每个窗口及其拦截结论。输出里 `上报通道` 显示 `未注册` 或
+  `启动快照` 显示 `未发出`，就说明宿主还没收到任何上报，此时驱动按 `on_unknown` 一律拦截。
+- 驱动侧：`[log] level = "trace"` 时每条报文都会记一行 `logstate <action> -> <snapshot|unknown>, N recording: [...]`，
+  重建完成（出现 `snapshot`）之后门控才按真实状态行事。
+
 其余可调项：`gate_private`（是否也拦截绑到跑团会话的私聊，默认只拦群消息）、
 `access_token`（与 `[onebot]` 各自独立）、`queue_limit`（单客户端积压上限，超出即丢，防止慢客户端拖垮驱动）。
 

@@ -665,6 +665,11 @@ mod按序读取，且从后向前覆盖)"},
 `.log end` 完成记录并发送日志文件
 本桌有登记gm或pl时（见.game）记录gm和pl的发言，否则记录所有人发言
 日志名须作为文件名合法，省略则使用创建时间戳。上传有失败风险，届时请.send {self}后台索取)"},
+{"bridge",R"(跑团日志门控排查.admin bridge
+`.admin bridge this state` 查看当前窗口的日志与门控上报状态
+`.admin bridge g[群号] state` 查看指定群聊，省略g则按私聊QQ号处理
+`.admin bridge list` 列出上报集合(会被门控的窗口)及各自结论
+门控指宿主(driver)在跑团期间掐断外部bot与该窗口的消息收发，依据为Dice侧上报的日志开关)"},
 {"deck",R"(牌堆实例.deck
 `.deck set (牌堆名=)公共牌堆名` //从公共牌堆创建实例
 `.deck set (牌堆名=)member` //从群成员列表创建实例

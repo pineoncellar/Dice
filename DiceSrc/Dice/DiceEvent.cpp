@@ -301,6 +301,64 @@ int DiceEvent::AdminEvent(const string_view& strOption){
 		reply(RandomGenerator::Report(), false);
 		return 1;
 	}
+	if (strOption == "bridge")
+	{
+		//跑团日志门控排查: 上报通道是否就绪、启动快照是否已发、窗口挂靠的会话与门控结论
+		const size_t intBegin{ intMsgCnt };
+		if (readPara() == "list")
+		{
+			ResList res;
+			res.linebreak();
+			if (LogList.empty())res << "上报集合为空: 无窗口被门控(宿主应放行全部消息)";
+			else for (const auto& ct : LogList)
+			{
+				auto game{ sessions.get_if(ct) };
+				res << printChat(ct) + " "
+					+ (game ? game->name + (game->is_logging() ? " 拦截" : " 放行(会话已不记录)")
+						: "放行(会话不存在)");
+			}
+			res << "上报集合共" + std::to_string(LogList.size()) + "个窗口";
+			reply(res.show(), false);
+			return 1;
+		}
+		intMsgCnt = intBegin;
+		chatInfo ct{};
+		if (readChat(ct) < 0 || !static_cast<bool>(ct = ct.locate()))
+		{
+			replyHelp("bridge");
+			return 1;
+		}
+		if (string strSub{ readPara() }; !strSub.empty() && strSub != "state")
+		{
+			replyHelp("bridge");
+			return 1;
+		}
+		const string strDri{ DD::getDriVer() };
+		ResList res;
+		res.linebreak();
+		res << "目标窗口: " + printChat(ct);
+		res << string("上报通道: ") + (DD::ApiList.count("DebugLog") ? "DebugLog已注册" : "DebugLog未注册(宿主收不到跑团状态)");
+		res << string("宿主版本: ") + (strDri.empty() ? "未就绪" : strDri);
+		res << "启动快照: " + (tLogSnapshot ? to_string((long long)time(nullptr) - tLogSnapshot) + "秒前发出"
+			: "未发出(Dice尚未初始化完,宿主按未知处理)");
+		if (auto game{ sessions.get_if(ct) })
+		{
+			const string strName{ game->get("log_name").to_str() };
+			const string strState{ game->is_logging() ? "记录中"
+				: (strName.empty() ? "未开过" : (game->log_start() ? "已暂停" : "已结束")) };
+			ShowList areas;
+			for (const auto& each : game->areas)areas << printChat(each);
+			res << "会话: " + game->name;
+			res << "日志状态: " + strState + (strName.empty() ? string()
+				: "「" + strName + "」" + (std::filesystem::exists(game->log_path()) ? "(文件存在)" : "(文件不存在)"));
+			res << string("门控结论: ") + (game->is_logging() ? "拦截此窗口消息" : "放行此窗口消息");
+			res << "覆盖窗口: " + areas.show(" ");
+		}
+		else res << "会话: 未绑定(此窗口不属于任何跑团会话,门控放行)";
+		res << "上报集合: " + std::to_string(LogList.size()) + "个窗口";
+		reply(res.show(), false);
+		return 1;
+	}
 	if (auto it = Console::intDefault.find(string(strOption));it != Console::intDefault.end())
 	{
 		int intSet = 0;
