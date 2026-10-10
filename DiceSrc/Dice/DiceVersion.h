@@ -13,7 +13,7 @@
 
 // Semantic version. Bump these for a release; TAG is "p"/"beta1"/... or "" for a plain release.
 #define DICE_VERSION_MAJOR 1
-#define DICE_VERSION_MINOR 1
+#define DICE_VERSION_MINOR 2
 #define DICE_VERSION_PATCH 0
 #define DICE_VERSION_TAG   "p"
 
