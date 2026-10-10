@@ -24,11 +24,26 @@
 #pragma once
 #ifndef DICE_RANDOM_GENERATOR
 #define DICE_RANDOM_GENERATOR
+#include <filesystem>
 #include <string>
 
 namespace RandomGenerator {
 	unsigned long long GetCycleCount();
 	int Randint(int lowest, int highest);
+
+	//随机数模式：0-伪随机（默认）；1-真随机（random.org取数缓存，池空或取数失败自动降级）
+	void Configure(int mode);
+	//载入本地真随机数池，须在DiceDir就绪后调用
+	void Load(const std::filesystem::path& cacheFile);
+	//有变化时保存池，没有变化则什么都不做
+	void Save();
+	//结束流程：等待补充线程收尾，避免进程卸载时仍有网络请求在途
+	void Shutdown();
+	//当前模式的一行描述，供.admin state展示
+	std::string ModeText();
+	//模式、池剩余位数、补充状态与降级次数的多行说明，供.admin randstate展示
+	std::string Report();
+
 	enum class Code { Decimal, Hex, Alpha, Alnum, Base64, UrlBase64};
 	std::string genKey(size_t len, Code = Code::Decimal);
 }

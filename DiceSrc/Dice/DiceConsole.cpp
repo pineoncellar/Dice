@@ -70,6 +70,8 @@ const fifo_dict_ci<int>Console::intDefault{
 {"EnablePython",0},
 {"DebugMode",0},
 {"DefaultCOCRoomRule",0},
+//随机数模式：0-伪随机；1-真随机
+{"RandomMode",0},
 };
 const std::unordered_map<std::string,string>Console::confComment{
 	{"DisabledGlobal","全局停用指令，对trust4不起效"},
@@ -117,6 +119,7 @@ const std::unordered_map<std::string,string>Console::confComment{
 	{"WebUIPort","指定使用的WebUI端口号，重启生效"},
 	{"EnablePython","是否启用Python，重启生效"},
 	{"DebugMode","调试模式：将所有接受的指令写入文件"},
+	{"RandomMode","随机数模式：0-伪随机(默认);1-真随机(从random.org取数缓存,池空或取数失败时自动降级),详情见.admin randstate"},
 	{"DefaultCOCRoomRule","未设置rc房规时调用的检定规则"},
 };
 const enumap<string> Console::mClockEvent{ "off", "on", "save", "clear" };
@@ -240,6 +243,7 @@ void Console::reset()
 	intConf.clear();
 	mWorkClock.clear();
 	NoticeList.clear();
+	applyRandomMode();
 }
 
 bool Console::load() {
@@ -285,6 +289,7 @@ bool Console::load() {
 		}
 		save();
 	}
+	applyRandomMode();
 	loadNotice();
 	return true;
 }

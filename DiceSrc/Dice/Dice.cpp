@@ -283,6 +283,7 @@ EVE_Enable(eventEnable){
 			strSelfName = "骰娘[" + toString(console.DiceMaid % 10000, 4) + "]";
 		}
 	}
+	RandomGenerator::Load(DiceDir / "conf" / "random_pool.json");
 	if (!console.load()){
 		console.setClock({ 11, 45 }, "clear");
 		console.loadNotice();
@@ -1043,6 +1044,9 @@ EVE_Menu(eventGUI)
 
 void global_exit() {
 	Enabled = false;
+	//先等补充线程收尾，避免卸载时仍有random.org请求在途
+	RandomGenerator::Shutdown();
+	RandomGenerator::Save();
 	mg_exit_library();
 	ManagerServer = nullptr;
 	dataBackUp();

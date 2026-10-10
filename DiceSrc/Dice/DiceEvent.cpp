@@ -11,6 +11,7 @@
 #include "GetRule.h"
 #include "DiceNetwork.h"
 #include "DiceCloud.h"
+#include "RandomGenerator.h"
 #include "DiceGUI.h"
 #include "DiceStatic.hpp"
 #include <memory>
@@ -269,6 +270,7 @@ int DiceEvent::AdminEvent(const string_view& strOption){
 		res << "Servant:" + printUser(console.DiceMaid)
 			<< "Master:" + printUser(console)
 			<< (console["Private"] ? "私用模式" : "公用模式");
+		res << ("随机数模式：" + RandomGenerator::ModeText());
 		if (console["LeaveDiscuss"])res << "禁用讨论组";
 		if (console["DisabledGlobal"])res << "全局静默中";
 		if (console["DisabledMe"])res << "全局禁用.me";
@@ -293,6 +295,11 @@ int DiceEvent::AdminEvent(const string_view& strOption){
 	{
 		replyMsg("strNotAdmin");
 		return -1;
+	}
+	if (strOption == "randstate")
+	{
+		reply(RandomGenerator::Report(), false);
+		return 1;
 	}
 	if (auto it = Console::intDefault.find(string(strOption));it != Console::intDefault.end())
 	{

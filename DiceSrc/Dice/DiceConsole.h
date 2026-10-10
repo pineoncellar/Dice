@@ -100,6 +100,7 @@ public:
 	{
 		intConf[key] = val;
 		save();
+		if (key == "RandomMode")applyRandomMode();
 	}
 
 	void addNotice(chatInfo ct, int lv);
@@ -114,6 +115,7 @@ public:
 	void loadNotice();
 	void saveNotice() const;
 private:
+	void applyRandomMode() { RandomGenerator::Configure((*this)["RandomMode"]); }
 	fifo_dict_ci<int> intConf;
 	std::multimap<Clock, string> mWorkClock{};
 	fifo_map<chatInfo, int> NoticeList{};

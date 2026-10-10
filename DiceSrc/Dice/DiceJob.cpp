@@ -144,6 +144,7 @@ void auto_save(AttrObject job) {
 	if (sch.is_job_cold("autosave"))return;
 	DD::debugLog(printSTNow() + " 自动保存");
 	dataBackUp();
+	RandomGenerator::Save();
 	//console.log(getMsg("strSelfName") + "已自动保存", 0, printSTNow());
 	if (console["AutoSaveInterval"] > 0) {
 		sch.refresh_cold("autosave", time(NULL) + console["AutoSaveInterval"] * (time_t)60);
