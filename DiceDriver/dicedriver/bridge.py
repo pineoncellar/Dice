@@ -207,6 +207,22 @@ def _reply(echo: Any, retcode: int, wording: str) -> str:
                        "wording": wording, "echo": echo}, ensure_ascii=False)
 
 
+_LOOPBACK = frozenset({"127.0.0.1", "::1", "localhost"})
+
+
+def exposure_warning(host: str, token: str) -> str:
+    """Non-empty when the relay would be reachable beyond this machine with no token.
+
+    The relay passes almost every action through, so an unauthenticated exposed port hands
+    whoever can reach it this account's full OneBot API.
+    """
+    if token or host in _LOOPBACK:
+        return ""
+    return (f"relay is listening on {host} without an access_token: any client that can reach "
+            f"the port gets this account's full OneBot API (set [bridge] access_token, "
+            f"or bind host = \"127.0.0.1\")")
+
+
 class RelayBridge:
     """The relay server. Owns its own listening socket and client set."""
 
@@ -232,6 +248,8 @@ class RelayBridge:
         self._stop = asyncio.Event()
         log.info("relay listening for OneBot clients on ws://%s:%d%s",
                  self.cfg.host, self.cfg.port, self.cfg.path)
+        if warn := exposure_warning(self.cfg.host, self.cfg.access_token):
+            log.warning("%s", warn)
         async with serve(self._handler, self.cfg.host, self.cfg.port,
                          process_request=self._authorize, max_size=None,
                          ping_interval=20, ping_timeout=20):

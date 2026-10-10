@@ -17,7 +17,7 @@ import pytest
 
 from fake_onebot import BOT_QQ, GROUP, MASTER_QQ, FakeOneBot
 
-from dicedriver.bridge import LOGSTATE_MARK, LogGate, RelayBridge
+from dicedriver.bridge import LOGSTATE_MARK, LogGate, RelayBridge, exposure_warning
 from dicedriver.config import BridgeCfg
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -221,6 +221,16 @@ def test_relay_enforces_its_path():
     assert _authorize(br, "/ob?x=1")[0] is None
     verdict, conn = _authorize(br, "/other")
     assert verdict == "reject" and conn.answered[0] == HTTPStatus.NOT_FOUND
+
+
+def test_exposure_warning_fires_only_for_tokenless_non_loopback_hosts():
+    assert exposure_warning("127.0.0.1", "") == ""
+    assert exposure_warning("localhost", "") == ""
+    assert exposure_warning("::1", "") == ""
+    assert exposure_warning("0.0.0.0", "s3cret") == ""
+    assert exposure_warning("192.168.1.10", "s3cret") == ""
+    assert "access_token" in exposure_warning("0.0.0.0", "")
+    assert "access_token" in exposure_warning("192.168.1.10", "")
 
 
 # ====================================================================== end-to-end
