@@ -28,6 +28,18 @@ send_format   = "array"                                 # array = 把 CQ 码转�
 forward_self_messages = false                           # 是否把骰娘自己发的消息也交给 Dice（需 Dice 的 ListenSelfEcho/ListenGroupEcho）
 friend_greeting = true                                  # 同意好友申请后，发送 Dice 的欢迎语
 
+[bridge]                                                # OneBot 中转：给外部 bot（麦bot）用的第二个 OB11 端点
+enabled       = false                                   # true = 驱动在本机监听，外部 bot 连进来
+host          = "127.0.0.1"
+port          = 6701                                    # 可自定义；不能与 [onebot] reverse 的 host/port/path 相同
+path          = "/"
+access_token  = ""                                      # 与 [onebot] 各自独立
+gate_private  = false                                   # 是否也拦截"绑定到跑团会话"的私聊（默认只拦截群消息）
+relay_self_messages = false                             # 是否把 message_sent（双方自己的回声）也转发下去
+on_unknown    = "closed"                                 # closed = 未收到状态快照前一律拦截（更安全）
+snapshot_grace_s = 30                                   # 超过这么久还没收到快照就放弃 closed 默认，避免永久静音
+queue_limit   = 1000                                    # 单个客户端的事件积压上限，超出即丢（防止慢客户端拖垮驱动）
+
 [log]
 file          = "logs/dicedriver.log"
 dice_log_file = "logs/dice-{qq}.log"                    # Dice 的 DebugLog 原文单独落盘

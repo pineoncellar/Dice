@@ -15,6 +15,7 @@ dicedriver/
   logs.py               主日志(含 TRACE) + Dice DebugLog 单独文件，异步写盘
   cq.py                 CQ 码 <-> OneBot 消息段
   onebot.py             正向/反向 WS、echo 配对、断线重连、access_token
+  bridge.py             OneBot 中转：给外部 bot（麦bot）的第二个 OB11 端点 + 跑团消息门控
   state.py              缓存与持久状态（成员/好友/昵称/最后发言/禁言到期/请求 flag）
   hostapi.py            39 个宿主接口的实现（纯 Python，可单测）
   native.py             ctypes：加载垫片与 Dice DLL，派发回调、投递事件
@@ -80,6 +81,52 @@ OneBot 端：
 - `root_dir` 必须能用本机 ANSI 代码页表示（Dice 用 `std::filesystem::path` 读它），请避免中文路径。
 - Dice 自身配置（主人、`config:` 下的开关等）在 `<root_dir>/Dice<QQ>/conf/console.yaml`。
 - 想用管理指令：先把主人 QQ 写进该文件的 `master:`；`.system reload|remake|die` 需主人权限。
+
+## OneBot 中转：把外部 bot 接进来（可选）
+
+目的是让一个**独立的 AI 应用**（下称麦bot）与骰子共用同一个 QQ：由麦bot 自己连 OneBot 协议端时，
+谁也拦不住它在跑团中插话；改成让麦bot 连本驱动，就有一处可以掌控的地方。
+
+```
+QQ ── 协议端(SnowLuma 等) ──► [onebot] 上游链路 ──► Dice DLL
+                                    │
+                                    └──► [bridge] 中转服务 ──► 麦bot
+```
+
+开启方式（`dicedriver.toml`，全部字段见 `dicedriver.example.toml`）：
+
+```toml
+[bridge]
+enabled = true
+port    = 6701      # 可自定义；端口不与 [onebot] reverse 冲突即可
+```
+
+麦bot 侧把它当普通 OneBot 协议端配置即可（`ws://127.0.0.1:6701/`），**不需要改麦bot**。
+
+工作机制：
+
+| 方向 | 行为 |
+|---|---|
+| 上行（麦bot → 协议端） | 逐个 action 透传；驱动换成自己的 echo 发往上游，再把上游的响应帧（`status`/`retcode`/`data`/`wording`）**原样**用麦bot 的 echo 还回去 |
+| 下行（协议端 → 麦bot） | 事件逐条转发；`message_sent` 默认不发（同号时无法分辨是谁发的，发下去会让两边互相回话） |
+
+**唯一的过滤条件是"消息收发"**：某个聊天正在跑团（Dice 开了 `.log` 记录）时，该聊天的
+**群消息事件不下发**、并且麦bot 发往该群的**消息被拒绝**（返回 `status=failed` + 非 0 retcode）。
+`get_*` 查询、群管理、`delete_msg` 等**一律照常透传**——中转不限制麦bot 的能力，只掐消息。
+
+跑团状态来自 Dice 的 `@dice.logstate` 上报（见 `DiceSrc/docs/DiceDriver-interface-duties.md` §4.4）：
+
+- Dice 启动时先发一份**全量快照**（`action=snapshot` 若干条 + `action=snapshot-end` 一条终止行），
+  驱动据此重建状态；之后 `.log new|on|off|end` 逐条增量上报。
+- **快照之前状态未知**，此时按 `on_unknown = "closed"` 一律拦截（更安全）。若始终收不到任何上报
+  （例如 Dice DLL 版本过旧），超过 `snapshot_grace_s` 后会放弃该默认并打一条 warning——
+  避免麦bot 被永久静音。
+- 上报在 Dice 侧是**同步**调用，且排在 mod 脚本分发之前，所以"开启记录的那条消息本身"就已经被拦住，
+  不存在错位一条消息的窗口。
+- 因此 **Dice DLL 与驱动必须成对升级**：只有新的 DLL 才会发这份上报。
+
+其余可调项：`gate_private`（是否也拦截绑到跑团会话的私聊，默认只拦群消息）、
+`access_token`（与 `[onebot]` 各自独立）、`queue_limit`（单客户端积压上限，超出即丢，防止慢客户端拖垮驱动）。
 
 ## 便携包：搬到没有开发环境的机器
 

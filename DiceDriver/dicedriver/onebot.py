@@ -205,7 +205,12 @@ class OneBotLink:
 
     # ------------------------------------------------------------------ actions
 
-    async def call(self, action: str, params: dict | None = None, timeout: float | None = None) -> Any:
+    async def call_raw(self, action: str, params: dict | None = None, timeout: float | None = None) -> dict:
+        """Send an action and return the verbatim response frame.
+
+        Unlike call(), a non-zero retcode is handed back instead of raising, so a relay can
+        pass the upstream's own status/retcode/wording through to its own client untouched.
+        """
         ws = self._ws
         if ws is None:
             raise LinkDown("not connected")
@@ -225,10 +230,18 @@ class OneBotLink:
             raise LinkDown("connection closed while sending") from None
         finally:
             self._pending.pop(echo, None)
+        if not isinstance(resp, dict):
+            resp = {}
         ms = (time.monotonic() - t0) * 1000
         retcode = resp.get("retcode", 0)
         status = resp.get("status", "ok")
         logs.trace(log, "action< %s retcode=%s status=%s %.0fms", action, retcode, status, ms)
+        return resp
+
+    async def call(self, action: str, params: dict | None = None, timeout: float | None = None) -> Any:
+        resp = await self.call_raw(action, params, timeout)
+        retcode = resp.get("retcode", 0)
+        status = resp.get("status", "ok")
         if status == "failed" or retcode not in (0, 1, None):
             raise OneBotError(action, int(retcode or -1), str(resp.get("wording") or resp.get("msg") or ""))
         return resp.get("data")

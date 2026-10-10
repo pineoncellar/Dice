@@ -57,6 +57,8 @@ def main(argv: list[str] | None = None) -> int:
 
     log = logging.getLogger("dd.main")
     log.info("DiceDriver starting (config %s, mode %s)", config_path, cfg.onebot.mode)
+    if cfg.bridge.enabled:
+        log.info("relay bridge enabled on ws://%s:%d%s", cfg.bridge.host, cfg.bridge.port, cfg.bridge.path)
     try:
         code = asyncio.run(app.run())
     except KeyboardInterrupt:

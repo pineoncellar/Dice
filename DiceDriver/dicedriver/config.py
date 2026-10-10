@@ -42,6 +42,26 @@ class OneBotCfg:
 
 
 @dataclass
+class BridgeCfg:
+    """OneBot relay endpoint for an external bot (麦bot): 我们从上游转出/转入它。
+
+    Disabled by default. When enabled the driver listens on host:port and speaks OneBot 11
+    to whoever connects, proxying actions upstream and relaying events downstream.
+    """
+
+    enabled: bool = False
+    host: str = "127.0.0.1"
+    port: int = 6701
+    path: str = "/"
+    access_token: str = ""
+    gate_private: bool = False  # also gate private chats bound to a TRPG session
+    relay_self_messages: bool = False  # relay message_sent (our own bots' echoes) downstream
+    on_unknown: str = "closed"  # closed | open — before the first snapshot completes
+    snapshot_grace_s: float = 30.0  # how long to keep that default before giving up on snapshots
+    queue_limit: int = 1000  # per-client backlog of relayed events before dropping
+
+
+@dataclass
 class LogCfg:
     file: str = "logs/dicedriver.log"
     dice_log_file: str = "logs/dice-{qq}.log"
@@ -82,6 +102,7 @@ class CacheCfg:
 class Config:
     driver: DriverCfg = field(default_factory=DriverCfg)
     onebot: OneBotCfg = field(default_factory=OneBotCfg)
+    bridge: BridgeCfg = field(default_factory=BridgeCfg)
     log: LogCfg = field(default_factory=LogCfg)
     notify: NotifyCfg = field(default_factory=NotifyCfg)
     heartbeat: HeartbeatCfg = field(default_factory=HeartbeatCfg)
@@ -99,6 +120,7 @@ class Config:
 _SECTIONS = {
     "driver": DriverCfg,
     "onebot": OneBotCfg,
+    "bridge": BridgeCfg,
     "log": LogCfg,
     "notify": NotifyCfg,
     "heartbeat": HeartbeatCfg,
@@ -150,6 +172,19 @@ def validate(cfg: Config) -> None:
         raise ConfigError("[notify] targets must be integers")
     if cfg.driver.pool_size < 2:
         raise ConfigError("[driver] pool_size must be >= 2")
+    br = cfg.bridge
+    if br.on_unknown not in ("closed", "open"):
+        raise ConfigError("[bridge] on_unknown must be closed or open")
+    if not (0 < br.port < 65536):
+        raise ConfigError("[bridge] port out of range")
+    if not br.path.startswith("/"):
+        raise ConfigError("[bridge] path must start with /")
+    if br.queue_limit < 1:
+        raise ConfigError("[bridge] queue_limit must be >= 1")
+    if (br.enabled and ob.mode == "reverse"
+            and br.host == ob.host and br.port == ob.port
+            and br.path.rstrip("/") == ob.path.rstrip("/")):
+        raise ConfigError("[bridge] host/port/path collides with the Reverse listener in [onebot]")
 
 
 def from_dict(raw: dict[str, Any], base_dir: Path) -> Config:

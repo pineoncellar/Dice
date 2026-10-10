@@ -14,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from . import logs
+from .bridge import LogGate, RelayBridge
 from .config import Config
 from .events import EventRouter
 from .hostapi import HostApi
@@ -49,10 +50,13 @@ class App:
         self.state = State(self.link, cfg.cache, cfg.resolve(cfg.driver.state_dir))
         self.notifier = Notifier(cfg.notify, self.link)
         self.heartbeat = Heartbeat(cfg.heartbeat)
-        self.api = HostApi(cfg, self.link, self.state, self.notifier, self.heartbeat, self)
+        self.loggate = LogGate(cfg.bridge.on_unknown, cfg.bridge.snapshot_grace_s)
+        self.api = HostApi(cfg, self.link, self.state, self.notifier, self.heartbeat, self, self.loggate)
         self.native = DiceNative(cfg.resolve(cfg.driver.shim_dll), cfg.resolve(cfg.driver.dice_dll), self.api)
         self.router = EventRouter(cfg, self.state, self.native, lambda: self.self_id, self.executor,
                                   lambda: self._ready)
+        self.bridge = (RelayBridge(cfg.bridge, self.link, self.loggate)
+                       if cfg.bridge.enabled else None)
 
     # ------------------------------------------------------------------ lifecycle interface used by HostApi
 
@@ -120,6 +124,8 @@ class App:
 
     def _on_event(self, ev: dict) -> None:
         self.router.on_event(ev)
+        if self.bridge is not None:
+            self.bridge.relay_event(ev)
 
     async def _on_connected(self, self_id: int) -> None:
         if self._bot_qq and self_id != self._bot_qq:
@@ -159,6 +165,7 @@ class App:
         self.state.friends()
         self.state.nick(self_id, self_id)
         t0 = time.monotonic()
+        self.loggate.arm()  # Dice reports the TRPG state as it finishes enabling
         self.native.start(self_id)
         log.info("Dice started in %.0f ms", (time.monotonic() - t0) * 1000)
         self._started = True
@@ -205,18 +212,35 @@ class App:
 
         link_task = asyncio.create_task(self.link.run())
         stop_task = asyncio.create_task(self._stop.wait())
-        done, _ = await asyncio.wait({link_task, stop_task}, return_when=asyncio.FIRST_COMPLETED)
+        waiting = {link_task, stop_task}
+        bridge_task = None
+        if self.bridge is not None:
+            bridge_task = asyncio.create_task(self._run_bridge())
+            waiting.add(bridge_task)
+        done, _ = await asyncio.wait(waiting, return_when=asyncio.FIRST_COMPLETED)
         if link_task in done and not self._stop.is_set():
             exc = link_task.exception()
             log.error("OneBot link ended: %s", exc or "unexpectedly")
             self._exit_code = self._exit_code or 1
         await self.link.close()
         link_task.cancel()
+        if self.bridge is not None:
+            await self.bridge.close()
+            bridge_task.cancel()
         self._stopping.set()
         if self._ready:
             log.info("stopping Dice")
             await asyncio.get_running_loop().run_in_executor(None, self._stop_dice, 20)
         return self._exit_code
+
+    async def _run_bridge(self) -> None:
+        """The relay is a side feature: if it cannot serve, the driver must still run."""
+        try:
+            await self.bridge.run()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log.error("relay bridge stopped: %s: %s", type(e).__name__, e)
 
     def finish(self, code: int) -> None:
         self._finish(code)

@@ -39,6 +39,29 @@ def test_mode_and_format_validation():
         config.from_dict({"onebot": {"mode": "forward", "url": "http://x"}}, config.Path("."))
 
 
+def test_bridge_defaults_and_validation():
+    cfg = config.from_dict({}, config.Path("."))
+    assert cfg.bridge.enabled is False and cfg.bridge.port == 6701
+    with pytest.raises(config.ConfigError, match="on_unknown"):
+        config.from_dict({"bridge": {"on_unknown": "maybe"}}, config.Path("."))
+    with pytest.raises(config.ConfigError, match="port"):
+        config.from_dict({"bridge": {"port": 0}}, config.Path("."))
+    with pytest.raises(config.ConfigError, match="path"):
+        config.from_dict({"bridge": {"path": "no-slash"}}, config.Path("."))
+    with pytest.raises(config.ConfigError, match="unknown key"):
+        config.from_dict({"bridge": {"enable": True}}, config.Path("."))
+
+
+def test_bridge_must_not_collide_with_the_reverse_listener():
+    reverse = {"mode": "reverse", "host": "127.0.0.1", "port": 6700, "path": "/"}
+    with pytest.raises(config.ConfigError, match="collides"):
+        config.from_dict({"onebot": reverse, "bridge": {"enabled": True, "host": "127.0.0.1", "port": 6700}},
+                         config.Path("."))
+    # same port is fine when the upstream is a client, not a listener
+    config.from_dict({"onebot": {"mode": "forward"}, "bridge": {"enabled": True, "port": 6700}},
+                     config.Path("."))
+
+
 def test_example_config_loads(tmp_path):
     from pathlib import Path
     example = Path(__file__).resolve().parent.parent / "dicedriver.example.toml"
