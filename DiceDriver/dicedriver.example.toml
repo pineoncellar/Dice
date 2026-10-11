@@ -56,7 +56,7 @@ targets       = []                                      # private=QQ 号，group
 batch_window_ms = 1000
 rate_limit    = 20                                      # 每分钟批数上限
 
-[heartbeat]                                             # 对应 DiceHeartbeat（Dice 侧需在 clock 里配置 heartbeat 任务）
+[heartbeat]                                             # 对应 DiceHeartbeat（Dice 启动后立即一次，之后每 300s 一次）
 enabled       = false
 url           = "http://127.0.0.1:8787/heartbeat"
 content_type  = "application/x-www-form-urlencoded"
