@@ -406,6 +406,8 @@ int clearGroup() {
 	for (auto id : GrpDelete) {
 		ChatList.erase(id);
 		if (sessions.has_session({ 0,id }))sessions.over({ 0,id });
+		//群记录已回收: 开关随之回到默认,此时上报才能让宿主解除门控
+		report_chat_switch(id, "clear");
 	}
 	return GrpDelete.size();
 }
@@ -581,6 +583,62 @@ string forward_filter(const string& raw, long long fromGID) {
 		else return msg;
 	}
 	return msg;
+}
+
+//驱动门控的三开关: bot(.bot off)/reply(.reply off)/log(记录中),任一失效即拦
+//这里只把Dice已有的状态读出来,不改动任何数据
+void report_window_state(long long gid, long long uid, long long chid, const string& session,
+	const char* action, bool logging, const string& name) {
+	//bot/reply只有群窗口有,私聊窗口不存在这两个开关,视作默认(on)
+	const bool botOn{ !gid || groupset(gid, "停用指令") <= 0 };
+	const bool replyOn{ !gid || groupset(gid, "禁用回复") <= 0 };
+	static auto sanitize = [](const string& s) {
+		string out{ s };
+		for (auto& c : out) {
+			if (static_cast<unsigned char>(c) < 0x20) c = ' ';
+		}
+		return out;
+	};
+	DD::debugLog(string("@dice.logstate v1 on=") + (logging ? "1" : "0")
+		+ " bot=" + (botOn ? "1" : "0")
+		+ " reply=" + (replyOn ? "1" : "0")
+		+ " action=" + action
+		+ " session=" + sanitize(session)
+		+ " gid=" + to_string(gid)
+		+ " uid=" + to_string(uid)
+		+ " chid=" + to_string(chid)
+		+ " name=" + sanitize(name));
+}
+
+void report_chat_switch(long long gid, const char* action) {
+	if (!gid)return;
+	//该群可能不属于任何会话(未开桌): 此时log为off、日志名为空
+	auto game{ sessions.get_if(chatInfo{ 0, gid }) };
+	report_window_state(gid, 0, 0, game ? game->name : string(), action,
+		game && game->is_logging(), game ? game->get("log_name").to_str() : string());
+}
+
+void report_window_state_snapshot() {
+	size_t cnt{ 0 };
+	unordered_set<long long> reported;
+	for (const auto& ct : LogList) {
+		auto game{ sessions.get_if(ct) };
+		if (!game)continue;
+		//以会话的真实状态上报: 陈旧条目会被自然纠正为off
+		report_window_state(ct.gid, ct.uid, ct.chid, game->name, "snapshot",
+			game->is_logging(), game->get("log_name").to_str());
+		if (ct.gid)reported.insert(ct.gid);
+		++cnt;
+	}
+	//开关失效的群窗口未必在记录中,单独补一遍(同一群在上面的会话上报里已带开关状态)
+	for (const auto& [gid, grp] : ChatList) {
+		if (!(grp->is("停用指令") || grp->is("禁用回复")) || reported.count(gid))continue;
+		report_chat_switch(gid, "snapshot");
+		++cnt;
+	}
+	//终止行: 即使一份日志都没开也要发,宿主据此认定"快照之外皆为默认态"
+	DD::debugLog(string("@dice.logstate v1 action=snapshot-end count=") + to_string(cnt));
+	tLogSnapshot = time(nullptr);
 }
 
 Chat& chat(long long id)

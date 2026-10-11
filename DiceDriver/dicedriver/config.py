@@ -55,6 +55,8 @@ class BridgeCfg:
     path: str = "/"
     access_token: str = ""
     gate_private: bool = False  # also gate private chats bound to a TRPG session
+    gate_bot: bool = True  # gate a group while Dice has .bot off there (停用指令)
+    gate_reply: bool = True  # gate a group while Dice has .reply off there (禁用回复)
     relay_self_messages: bool = False  # relay message_sent (our own bots' echoes) downstream
     on_unknown: str = "closed"  # closed | open — before the first snapshot completes
     snapshot_grace_s: float = 30.0  # how long to keep that default before giving up on snapshots

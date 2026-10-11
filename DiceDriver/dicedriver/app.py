@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from . import logs
-from .bridge import LogGate, RelayBridge
+from .bridge import RelayBridge, WindowGate
 from .config import Config
 from .events import EventRouter
 from .hostapi import HostApi
@@ -50,12 +50,13 @@ class App:
         self.state = State(self.link, cfg.cache, cfg.resolve(cfg.driver.state_dir))
         self.notifier = Notifier(cfg.notify, self.link)
         self.heartbeat = Heartbeat(cfg.heartbeat)
-        self.loggate = LogGate(cfg.bridge.on_unknown, cfg.bridge.snapshot_grace_s)
-        self.api = HostApi(cfg, self.link, self.state, self.notifier, self.heartbeat, self, self.loggate)
+        self.gate = WindowGate(cfg.bridge.on_unknown, cfg.bridge.snapshot_grace_s,
+                               cfg.bridge.gate_bot, cfg.bridge.gate_reply)
+        self.api = HostApi(cfg, self.link, self.state, self.notifier, self.heartbeat, self, self.gate)
         self.native = DiceNative(cfg.resolve(cfg.driver.shim_dll), cfg.resolve(cfg.driver.dice_dll), self.api)
         self.router = EventRouter(cfg, self.state, self.native, lambda: self.self_id, self.executor,
                                   lambda: self._ready)
-        self.bridge = (RelayBridge(cfg.bridge, self.link, self.loggate)
+        self.bridge = (RelayBridge(cfg.bridge, self.link, self.gate)
                        if cfg.bridge.enabled else None)
 
     # ------------------------------------------------------------------ lifecycle interface used by HostApi
@@ -165,7 +166,7 @@ class App:
         self.state.friends()
         self.state.nick(self_id, self_id)
         t0 = time.monotonic()
-        self.loggate.arm()  # Dice reports the TRPG state as it finishes enabling
+        self.gate.arm()  # Dice reports the window states as it finishes enabling
         self.native.start(self_id)
         log.info("Dice started in %.0f ms", (time.monotonic() - t0) * 1000)
         self._started = True

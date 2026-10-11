@@ -42,6 +42,10 @@ def test_mode_and_format_validation():
 def test_bridge_defaults_and_validation():
     cfg = config.from_dict({}, config.Path("."))
     assert cfg.bridge.enabled is False and cfg.bridge.port == 6701
+    # the gate switches are on by default: bot on / reply on / log off is the pass state
+    assert cfg.bridge.gate_bot is True and cfg.bridge.gate_reply is True
+    assert config.from_dict({"bridge": {"gate_reply": False}},
+                            config.Path(".")).bridge.gate_reply is False
     with pytest.raises(config.ConfigError, match="on_unknown"):
         config.from_dict({"bridge": {"on_unknown": "maybe"}}, config.Path("."))
     with pytest.raises(config.ConfigError, match="port"):

@@ -318,6 +318,23 @@ int DiceEvent::AdminEvent(const string_view& strOption){
 						: "放行(会话不存在)");
 			}
 			res << "上报集合共" + std::to_string(LogList.size()) + "个窗口";
+			//bot/reply开关失效的群窗口同样被门控
+			vector<long long> swOff;
+			for (const auto& [gid, grp] : ChatList)
+			{
+				if (grp->is("停用指令") || grp->is("禁用回复"))swOff.push_back(gid);
+			}
+			if (swOff.empty())res << "开关失效的群窗口: 无";
+			else
+			{
+				res << "开关失效的群窗口:";
+				for (long long gid : swOff)
+				{
+					res << ChatList[gid]->print() + " "
+						+ (ChatList[gid]->is("停用指令") ? "bot off " : "")
+						+ (ChatList[gid]->is("禁用回复") ? "reply off" : "");
+				}
+			}
 			reply(res.show(), false);
 			return 1;
 		}
@@ -334,6 +351,11 @@ int DiceEvent::AdminEvent(const string_view& strOption){
 			return 1;
 		}
 		const string strDri{ DD::getDriVer() };
+		//三个开关的当前状态(私聊无bot/reply开关),门控为三者的并集
+		const bool isBotOff{ ct.gid && groupset(ct.gid, "停用指令") > 0 };
+		const bool isReplyOff{ ct.gid && groupset(ct.gid, "禁用回复") > 0 };
+		auto game{ sessions.get_if(ct) };
+		const bool isLogging{ game && game->is_logging() };
 		ResList res;
 		res.linebreak();
 		res << "目标窗口: " + printChat(ct);
@@ -341,20 +363,29 @@ int DiceEvent::AdminEvent(const string_view& strOption){
 		res << string("宿主版本: ") + (strDri.empty() ? "未就绪" : strDri);
 		res << "启动快照: " + (tLogSnapshot ? to_string((long long)time(nullptr) - tLogSnapshot) + "秒前发出"
 			: "未发出(Dice尚未初始化完,宿主按未知处理)");
-		if (auto game{ sessions.get_if(ct) })
+		res << string("窗口开关: bot=") + (ct.gid ? (isBotOff ? "off" : "on") : "无(私聊)")
+			+ " reply=" + (ct.gid ? (isReplyOff ? "off" : "on") : "无(私聊)")
+			+ " log=" + (isLogging ? "on" : "off");
+		if (game)
 		{
 			const string strName{ game->get("log_name").to_str() };
-			const string strState{ game->is_logging() ? "记录中"
+			const string strState{ isLogging ? "记录中"
 				: (strName.empty() ? "未开过" : (game->log_start() ? "已暂停" : "已结束")) };
 			ShowList areas;
 			for (const auto& each : game->areas)areas << printChat(each);
 			res << "会话: " + game->name;
 			res << "日志状态: " + strState + (strName.empty() ? string()
 				: "「" + strName + "」" + (std::filesystem::exists(game->log_path()) ? "(文件存在)" : "(文件不存在)"));
-			res << string("门控结论: ") + (game->is_logging() ? "拦截此窗口消息" : "放行此窗口消息");
 			res << "覆盖窗口: " + areas.show(" ");
 		}
-		else res << "会话: 未绑定(此窗口不属于任何跑团会话,门控放行)";
+		else res << "会话: 未绑定(此窗口不属于任何跑团会话)";
+		res << string("门控结论: ") + ((isLogging || isBotOff || isReplyOff)
+			? string("拦截此窗口消息(") + (isLogging ? "log on" : "")
+				+ (isLogging && (isBotOff || isReplyOff) ? "+" : "")
+				+ (isBotOff ? "bot off" : "")
+				+ (isBotOff && isReplyOff ? "+" : "")
+				+ (isReplyOff ? "reply off" : "") + ")"
+			: "放行此窗口消息");
 		res << "上报集合: " + std::to_string(LogList.size()) + "个窗口";
 		reply(res.show(), false);
 		return 1;
@@ -722,6 +753,7 @@ int DiceEvent::AdminEvent(const string_view& strOption){
 				if (groupset(llTargetID, "停用指令") > 0)
 				{
 					chat(llTargetID).reset("停用指令");
+					report_chat_switch(llTargetID);
 					note("已令" + getMsg("strSelfName") + "在" + printGroup(llTargetID) + "启用指令√");
 				}
 				else reply(getMsg("strSelfName") + "已在该群启用指令!");
@@ -736,6 +768,7 @@ int DiceEvent::AdminEvent(const string_view& strOption){
 			if (groupset(llTargetID, "停用指令") < 1)
 			{
 				chat(llTargetID).set("停用指令");
+				report_chat_switch(llTargetID);
 				note("已令" + getMsg("strSelfName") + "在" + printGroup(llTargetID) + "停用指令√", 0b1);
 			}
 			else reply(getMsg("strSelfName") + "已在该群停用指令!");
@@ -1111,6 +1144,7 @@ int DiceEvent::BasicOrder()
 						if (groupset(fromChat.gid, "停用指令") > 0)
 						{
 							chat(fromChat.gid).reset("停用指令");
+							report_chat_switch(fromChat.gid);
 							replyMsg("strBotOn");
 						}
 						else
@@ -1138,6 +1172,7 @@ int DiceEvent::BasicOrder()
 					else 
 					{
 						chat(fromChat.gid).set("停用指令");
+						report_chat_switch(fromChat.gid);
 						replyMsg("strBotOff");
 					}
 				}
@@ -1178,6 +1213,7 @@ int DiceEvent::BasicOrder()
 			}
 			else if (trusted > 0 || canRoomHost()) {
 				chat(fromChat.gid).reset(option);
+				report_chat_switch(fromChat.gid);
 				replyMsg("strReplyOn");
 			}
 			else {
@@ -1192,6 +1228,7 @@ int DiceEvent::BasicOrder()
 			}
 			else if (trusted > 0 || canRoomHost()) {
 				chat(fromChat.gid).set(option);
+				report_chat_switch(fromChat.gid);
 				replyMsg("strReplyOff");
 			}
 			else {
@@ -2020,6 +2057,7 @@ int DiceEvent::InnerOrder() {
 						if (grp->is(strOption))continue;
 						grp->set(strOption);
 						Cnt++;
+						if (isGateSwitch(strOption))report_chat_switch(id);
 					}
 					set("cnt", Cnt);
 					note(getMsg("strGroupSetAll"), 0b100);
@@ -2029,6 +2067,7 @@ int DiceEvent::InnerOrder() {
 						if (!grp->is(strOption))continue;
 						grp->reset(strOption);
 						Cnt++;
+						if (isGateSwitch(strOption))report_chat_switch(id);
 					}
 					set("cnt", Cnt);
 					note(getMsg("strGroupSetAll"), 0b100);
@@ -2069,6 +2108,7 @@ int DiceEvent::InnerOrder() {
 						if (groupset(llGroup, get_str("option")) < 1) {
 							chat(llGroup).set(get_str("option"));
 							++cntSet;
+							if (isGateSwitch(get_str("option")))report_chat_switch(llGroup);
 							if (at("option") == "许可使用") {
 								AddMsgToQueue(getMsg("strGroupAuthorized", *this), { 0, fromChat.uid });
 							}
@@ -2080,6 +2120,7 @@ int DiceEvent::InnerOrder() {
 					else if (grp.is(get_str("option"))) {
 						++cntSet;
 						chat(llGroup).reset(get_str("option"));
+						if (isGateSwitch(get_str("option")))report_chat_switch(llGroup);
 					}
 					else {
 						replyMsg("strGroupSetOffAlready");

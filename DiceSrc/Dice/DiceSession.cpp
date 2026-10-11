@@ -194,30 +194,12 @@ void DiceSession::ob_clr(DiceEvent* msg)
 
 /**
  * 跑团(日志)状态上报,供宿主(driver)对外部应用(如麦bot)做消息门控
- * 单行写入dice-<qq>.log; name可能含空格,故置于行尾,控制字符替换为空格
+ * 上报内容是该窗口的三个开关(bot/reply/log),报文由report_window_state统一生成
  */
-static void report_log_state(const chatInfo& ct, const string& session, const char* action,
-	bool logging, const string& name) {
-	static auto sanitize = [](const string& s) {
-		string out{ s };
-		for (auto& c : out) {
-			if (static_cast<unsigned char>(c) < 0x20) c = ' ';
-		}
-		return out;
-	};
-	DD::debugLog(string("@dice.logstate v1 on=") + (logging ? "1" : "0")
-		+ " action=" + action
-		+ " session=" + sanitize(session)
-		+ " gid=" + to_string(ct.gid)
-		+ " uid=" + to_string(ct.uid)
-		+ " chid=" + to_string(ct.chid)
-		+ " name=" + sanitize(name));
-}
-
 void DiceSession::notify_log_switch(const char* action) {
 	for (const auto& ct : areas) {
 		//先上报宿主,避免被mod脚本的执行耗时拖住
-		report_log_state(ct, name, action, logger.isLogging, logger.name);
+		report_window_state(ct.gid, ct.uid, ct.chid, name, action, logger.isLogging, logger.name);
 		AttrObject eve{ AttrVars{
 			{"hook", "LogSwitch"},
 			{"action", action},
@@ -231,21 +213,6 @@ void DiceSession::notify_log_switch(const char* action) {
 		} };
 		fmt->call_hook_event(eve);
 	}
-}
-
-void report_log_state_snapshot() {
-	size_t cnt{ 0 };
-	for (const auto& ct : LogList) {
-		auto game{ sessions.get_if(ct) };
-		if (!game)continue;
-		//以会话的真实状态上报: 陈旧条目会被自然纠正为off
-		report_log_state(ct, game->name, "snapshot", game->is_logging(),
-			game->get("log_name").to_str());
-		++cnt;
-	}
-	//终止行: 即使一份日志都没开也要发,宿主据此认定"快照之外皆未跑团"
-	DD::debugLog(string("@dice.logstate v1 action=snapshot-end count=") + to_string(cnt));
-	tLogSnapshot = time(nullptr);
 }
 
 void DiceSession::log_new(DiceEvent* msg) {

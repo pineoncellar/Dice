@@ -4,10 +4,11 @@ An external framework (麦bot) connects here as if the driver were its protocol�
 proxied upstream under the driver's own echo namespace and the upstream's response frame is
 handed back under the *caller's* echo; events are relayed downstream.
 
-The only thing this relay filters is **message send/receive**: while Dice is recording a
-chat (`.log on`, i.e. a TRPG session in progress) group messages for that group are neither
-relayed down nor accepted up. Every `get_*` query and every other action passes through
-untouched — the relay must not constrain what the external bot is able to do.
+The only thing this relay filters is **message send/receive**: while a chat window is in a
+non-default state — Dice is recording it (`.log on`, a TRPG session in progress) or one of its
+switches is off (`.bot off` / `.reply off`) — messages for it are neither relayed down nor
+accepted up. Every `get_*` query and every other action passes through untouched — the relay
+must not constrain what the external bot is able to do.
 
 The upstream link and this relay keep separate connections, separate echo namespaces and
 separate pending maps, so they can never displace each other.
@@ -20,6 +21,7 @@ import json
 import logging
 import threading
 import time
+from dataclasses import dataclass
 from http import HTTPStatus
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
@@ -32,7 +34,11 @@ from .onebot import LinkDown, OneBotLink
 
 log = logging.getLogger("dd.bridge")
 
-# Dice's TRPG-state report (see DiceSrc/docs/DiceDriver-interface-duties.md §4.4).
+# Dice's window-state report (see DiceSrc/docs/DiceDriver-interface-duties.md §4.4):
+#   @dice.logstate v1 on=<0|1> bot=<0|1> reply=<0|1> action=... — one chat window's gate
+#   switches. `on=` is the TRPG log switch; `bot=`/`reply=` are Dice's `.bot`/`.reply` group
+#   switches. The latter two were added later, so a report without them means "both on" —
+#   that is also how an older Dice build behaves, and it degrades to the log-only gate.
 LOGSTATE_MARK = "@dice.logstate"
 _SNAPSHOT = "snapshot"
 _SNAPSHOT_END = "snapshot-end"
@@ -67,23 +73,51 @@ def _chat_key(gid: Any = 0, uid: Any = 0, chid: Any = 0) -> tuple[str, int] | No
     return None
 
 
-class LogGate:
-    """Which chat windows Dice is recording, fed by the `@dice.logstate` lines.
+@dataclass(frozen=True)
+class WindowState:
+    """One chat window's three gate switches; the default (bot on / reply on / log off) passes."""
 
-    Authoritative-snapshot model. Dice emits one line per recording window followed by a
-    `snapshot-end`; that terminator replaces the whole table, so a window absent from it is
-    known *not* to be recording. Until the first snapshot completes the state is unknown and
-    `on_unknown` decides — with `snapshot_grace_s` as the escape hatch, so that a Dice build
-    which never reports cannot silence the external bot forever.
+    logging: bool = False
+    bot: bool = True
+    reply: bool = True
+
+    @property
+    def is_default(self) -> bool:
+        return not (self.logging or not self.bot or not self.reply)
+
+
+def _state_of(info: dict[str, str]) -> WindowState | None:
+    """A report's window state, or None when every switch is at its default (i.e. no entry)."""
+    state = WindowState(logging=info.get("on") == "1",
+                        bot=info.get("bot", "1") != "0",
+                        reply=info.get("reply", "1") != "0")
+    return None if state.is_default else state
+
+
+class WindowGate:
+    """Which chat windows must have their messages withheld.
+
+    Dice reports the *deviations* from the default state: the log switch plus the two group
+    switches `.bot` / `.reply`. An incremental report carries one window; the startup snapshot
+    carries every non-default window and is terminated by `snapshot-end`, which replaces the
+    whole table — so a window absent from it is known to be in its default state (released).
+
+    Until the first snapshot completes the state is unknown and `on_unknown` decides, with
+    `snapshot_grace_s` as the escape hatch, so that a Dice build which never reports cannot
+    silence the external bot forever. `gate_bot` / `gate_reply` drop a condition without
+    touching Dice; the whole record is kept either way, so `reason()` stays truthful.
     """
 
-    def __init__(self, on_unknown: str = "closed", grace_s: float = 30.0):
+    def __init__(self, on_unknown: str = "closed", grace_s: float = 30.0,
+                 gate_bot: bool = True, gate_reply: bool = True):
         self._lock = threading.Lock()
-        self._on: set[tuple[str, int]] = set()
-        self._seen: set[tuple[str, int]] = set()
+        self._table: dict[tuple[str, int], WindowState] = {}
+        self._seen: dict[tuple[str, int], WindowState] = {}
         self._bootstrapped = False
         self._on_unknown = on_unknown
         self._grace_s = grace_s
+        self._gate_bot = gate_bot
+        self._gate_reply = gate_reply
         self._armed_at = 0.0
         self._warned = False
 
@@ -95,7 +129,7 @@ class LogGate:
             self._armed_at = time.monotonic()
 
     def feed(self, line: str) -> bool:
-        """Consume one DebugLog line. Returns True when it was a state report."""
+        """Consume one DebugLog line. Returns True when it was a window-state report."""
         info = self.parse(line)
         if info is None:
             return False
@@ -103,17 +137,17 @@ class LogGate:
         key = _chat_key(info.get("gid"), info.get("uid"), info.get("chid"))
         with self._lock:
             if action == _SNAPSHOT:
-                if key is not None:
-                    self._seen.add(key)
+                if key is not None and (state := _state_of(info)) is not None:
+                    self._seen[key] = state
             elif action == _SNAPSHOT_END:
-                self._on = self._seen
-                self._seen = set()
+                self._table = self._seen
+                self._seen = {}
                 self._bootstrapped = True
             elif key is not None:
-                if info.get("on") == "1":
-                    self._on.add(key)
+                if (state := _state_of(info)) is None:
+                    self._table.pop(key, None)
                 else:
-                    self._on.discard(key)
+                    self._table[key] = state
                 # An incremental report proves the channel works, but it is not the full
                 # picture, so it must not promote the gate to "everyone else is idle".
         logs.trace(log, "logstate %s -> %s", action or "?", self.describe())
@@ -121,7 +155,11 @@ class LogGate:
 
     @staticmethod
     def parse(line: str) -> dict[str, str] | None:
-        """`@dice.logstate v1 on=1 action=new ... name=<may contain spaces>` -> dict."""
+        """`@dice.logstate v1 k=v ... name=<may contain spaces>` -> dict.
+
+        A repeated key is ignored (the first one wins): Dice's `session=`/`name=` fields are
+        free text, so a later `on=`/`action=` must never be able to rewrite the report.
+        """
         if not line.startswith(LOGSTATE_MARK + " "):
             return None
         parts = line[len(LOGSTATE_MARK) + 1:].split(" ")
@@ -130,7 +168,7 @@ class LogGate:
         out: dict[str, str] = {}
         for i in range(1, len(parts)):
             key, sep, value = parts[i].partition("=")
-            if not sep:
+            if not sep or key in out:
                 continue
             if key == "name":  # always last, and may contain spaces
                 out[key] = " ".join([value, *parts[i + 1:]])
@@ -145,22 +183,55 @@ class LogGate:
         if key is None:
             return False
         with self._lock:
-            if self._bootstrapped:
-                return key in self._on
-            if self._on_unknown == "open":
-                return False
-            if self._armed_at and time.monotonic() - self._armed_at >= self._grace_s:
-                if not self._warned:
-                    self._warned = True
-                    log.warning("no %s report within %.0fs; assuming no TRPG session is running "
-                                "(check that the Dice DLL emits it)", LOGSTATE_MARK, self._grace_s)
-                return False
-            return True
+            if not self._bootstrapped:
+                return self._unknown_blocks()
+            return self._gates(self._table.get(key))
+
+    def reason(self, key: tuple[str, int] | None) -> str:
+        """Why this chat is gated ('' = it is not)."""
+        if key is None:
+            return ""
+        with self._lock:
+            if not self._bootstrapped:
+                return "TRPG session" if self._unknown_blocks() else ""
+            state = self._table.get(key)
+        if not self._gates(state):
+            return ""
+        causes = []
+        if state.logging:
+            causes.append("TRPG session")
+        if self._gate_bot and not state.bot:
+            causes.append("bot off")
+        if self._gate_reply and not state.reply:
+            causes.append("reply off")
+        return "+".join(causes)
 
     def describe(self) -> str:
         with self._lock:
             state = "snapshot" if self._bootstrapped else "unknown"
-            return f"{state}, {len(self._on)} recording: {sorted(self._on)}"
+            return f"{state}, {len(self._table)} not-default: {sorted(self._table)}"
+
+    # ------------------------------------------------------------------ policy
+
+    def _gates(self, state: WindowState | None) -> bool:
+        """Whether this window's switches gate it here (the config may drop a condition)."""
+        if state is None:
+            return False
+        return (state.logging
+                or (self._gate_bot and not state.bot)
+                or (self._gate_reply and not state.reply))
+
+    def _unknown_blocks(self) -> bool:
+        """The pre-first-snapshot policy; the caller holds the lock."""
+        if self._on_unknown == "open":
+            return False
+        if self._armed_at and time.monotonic() - self._armed_at >= self._grace_s:
+            if not self._warned:
+                self._warned = True
+                log.warning("no %s report within %.0fs; assuming every window is in its default "
+                            "state (check that the Dice DLL emits it)", LOGSTATE_MARK, self._grace_s)
+            return False
+        return True
 
 
 class RelayClient:
@@ -207,6 +278,20 @@ def _reply(echo: Any, retcode: int, wording: str) -> str:
                        "wording": wording, "echo": echo}, ensure_ascii=False)
 
 
+# Why a window is gated -> what the rejected caller is told. Keys are the reason fragments
+# produced by `WindowGate.reason` (several are joined with '+').
+_BLOCK_CAUSE = {
+    "TRPG session": "该聊天正在跑团（日志记录中）",
+    "bot off": "该聊天已静默（.bot off）",
+    "reply off": "该聊天已禁用回复（.reply off）",
+}
+
+
+def _blocked_wording(reason: str) -> str:
+    said = [text for cause, text in _BLOCK_CAUSE.items() if cause in reason.split("+")]
+    return ("；".join(said) or "该聊天当前不接收消息") + "，消息已拦截"
+
+
 _LOOPBACK = frozenset({"127.0.0.1", "::1", "localhost"})
 
 
@@ -226,7 +311,7 @@ def exposure_warning(host: str, token: str) -> str:
 class RelayBridge:
     """The relay server. Owns its own listening socket and client set."""
 
-    def __init__(self, cfg, link: OneBotLink, gate: LogGate):
+    def __init__(self, cfg, link: OneBotLink, gate: WindowGate):
         self.cfg = cfg
         self.link = link
         self.gate = gate
@@ -292,9 +377,9 @@ class RelayBridge:
             return "message_sent"
         kind = ev.get("message_type")
         if kind == _GROUP_EVENT:
-            return "TRPG session" if self.gate.gated(_chat_key(gid=ev.get("group_id"))) else ""
+            return self.gate.reason(_chat_key(gid=ev.get("group_id")))
         if self.cfg.gate_private and kind == _PRIVATE_EVENT:
-            return "TRPG session" if self.gate.gated(_chat_key(uid=ev.get("user_id"))) else ""
+            return self.gate.reason(_chat_key(uid=ev.get("user_id")))
         return ""
 
     # ------------------------------------------------------------------ upstream
@@ -322,9 +407,9 @@ class RelayBridge:
             await client.put(_reply(echo, RET_BAD_REQUEST, "missing action"))
             return
         target = self.target_of(action, params)
-        if target is not None and self.gate.gated(target):
-            log.info("relay blocked %s to %s: in a TRPG session", action, target)
-            await client.put(_reply(echo, RET_BLOCKED, "该聊天正在跑团（日志记录中），消息已拦截"))
+        if target is not None and (blocked := self.gate.reason(target)):
+            log.info("relay blocked %s to %s: %s", action, target, blocked)
+            await client.put(_reply(echo, RET_BLOCKED, _blocked_wording(blocked)))
             return
         if not self.link.connected:
             log.warning("relay dropping %s: upstream OneBot link is down", action)

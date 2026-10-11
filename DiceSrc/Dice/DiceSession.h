@@ -283,8 +283,6 @@ public:
 	void over(chatInfo ct);
 };
 extern DiceSessionManager sessions;
-//把当前所有正在记录的聊天窗口上报给宿主(driver),供其在启动/重载后重建跑团状态
-void report_log_state_snapshot();
 //跑团日志上报的窗口集合(启动快照与增量上报的门控依据),供.admin bridge查看
 extern unordered_set<chatInfo> LogList;
 //最近一次全量上报(启动快照)发出的时间,0=尚未发出(即门控尚未初始化)

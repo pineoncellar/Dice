@@ -35,6 +35,8 @@ port          = 6701                                    # 可自定义；不能�
 path          = "/"
 access_token  = ""                                      # 与 [onebot] 各自独立
 gate_private  = false                                   # 是否也拦截"绑定到跑团会话"的私聊（默认只拦截群消息）
+gate_bot      = true                                    # .bot off 的群是否也拦截（bot指令静默时同步静音外部bot）
+gate_reply    = true                                    # .reply off 的群是否也拦截（关键词回复关闭时同步静音）
 relay_self_messages = false                             # 是否把 message_sent（双方自己的回声）也转发下去
 on_unknown    = "closed"                                 # closed = 未收到状态快照前一律拦截（更安全）
 snapshot_grace_s = 30                                   # 超过这么久还没收到快照就放弃 closed 默认，避免永久静音

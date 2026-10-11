@@ -234,6 +234,18 @@ public:
 extern unordered_map<long long, ptr<Chat>> ChatList;
 Chat& chat(long long id);
 int groupset(long long id, const string& st);
+//窗口开关状态上报: 把窗口当前的三开关读出来写给宿主(driver),供其对外部应用(如麦bot)做消息门控
+//bot/reply读自群聊记录(只有群窗口有这两个开关),log由调用方传入;单行写入dice-<qq>.log
+void report_window_state(long long gid, long long uid, long long chid, const string& session,
+	const char* action, bool logging, const string& name);
+//某群窗口的开关被改动后(或群记录被回收,此时action=clear)把其当前状态上报宿主
+void report_chat_switch(long long gid, const char* action = "switch");
+//该群配置项是否参与宿主门控(只有bot/reply两个开关)
+inline bool isGateSwitch(const string& option) {
+	return option == "停用指令" || option == "禁用回复";
+}
+//把当前所有"非默认态"的窗口(正在记录的 ∪ 开关失效的)上报宿主,供其启动/重载后重建门控
+void report_window_state_snapshot();
 
 #ifdef _WIN32
 DWORD getRamPort();

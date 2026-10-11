@@ -43,10 +43,10 @@ class Result:
 
 
 class HostApi:
-    def __init__(self, cfg, bot, state: State, notifier, heartbeat, lifecycle, loggate=None):
+    def __init__(self, cfg, bot, state: State, notifier, heartbeat, lifecycle, gate=None):
         """lifecycle: object with restart(reason: str), exit(), root_dir: Path, self_id: int.
 
-        loggate: optional LogGate; when given, Dice's TRPG-state reports are consumed here so
+        gate: optional WindowGate; when given, Dice's window-state reports are consumed here so
         that the relay sees the switch synchronously with the command that flipped it.
         """
         self.cfg = cfg
@@ -55,7 +55,7 @@ class HostApi:
         self.notifier = notifier
         self.heartbeat = heartbeat
         self.lifecycle = lifecycle
-        self.loggate = loggate
+        self.gate = gate
 
     # ------------------------------------------------------------------ dispatch
 
@@ -178,8 +178,8 @@ class HostApi:
     # ------------------------------------------------------------------ B. log / notify / heartbeat
 
     def DebugLog(self, a, s):
-        if self.loggate is not None:
-            self.loggate.feed(s)  # TRPG-state reports drive the relay's message gate
+        if self.gate is not None:
+            self.gate.feed(s)  # window-state reports drive the relay's message gate
         dice_log.info(s)
 
     def DebugMsg(self, a, s):

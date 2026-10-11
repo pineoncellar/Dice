@@ -17,7 +17,8 @@ import pytest
 
 from fake_onebot import BOT_QQ, GROUP, MASTER_QQ, FakeOneBot
 
-from dicedriver.bridge import LOGSTATE_MARK, LogGate, RelayBridge, exposure_warning
+from dicedriver.bridge import (LOGSTATE_MARK, RelayBridge, WindowGate, _blocked_wording,
+                               exposure_warning)
 from dicedriver.config import BridgeCfg
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -29,33 +30,35 @@ needs_dll = pytest.mark.skipif(not (DICE_DLL.is_file() and SHIM.is_file()),
                                reason="needs output\\w4123.Dice.windows.amd64.dll and output\\dd_shim.dll")
 
 
-# ====================================================================== unit: LogGate
+# ============================================================ unit: WindowGate (log only)
 
-def _line(action: str, on: int = 0, gid: int = 0, uid: int = 0, chid: int = 0, name: str = "") -> str:
-    return (f"{LOGSTATE_MARK} v1 on={on} action={action} session=s gid={gid} uid={uid} "
-            f"chid={chid} name={name}")
+def _line(action: str, on: int = 0, gid: int = 0, uid: int = 0, chid: int = 0, name: str = "",
+          bot: int = 1, reply: int = 1) -> str:
+    return (f"{LOGSTATE_MARK} v1 on={on} bot={bot} reply={reply} action={action} "
+            f"session=s gid={gid} uid={uid} chid={chid} name={name}")
+
 
 
 def test_parse_extracts_fields_and_keeps_spaced_names():
-    got = LogGate.parse(_line("new", on=1, gid=20001, name="my log name"))
+    got = WindowGate.parse(_line("new", on=1, gid=20001, name="my log name"))
     assert got["action"] == "new" and got["on"] == "1" and got["gid"] == "20001"
     assert got["name"] == "my log name"
-    assert LogGate.parse("[something else] on=1") is None
-    assert LogGate.parse(f"{LOGSTATE_MARK} v2 on=1 action=new") is None
+    assert WindowGate.parse("[something else] on=1") is None
+    assert WindowGate.parse(f"{LOGSTATE_MARK} v2 on=1 action=new") is None
 
 
 def test_unknown_is_gated_before_the_first_snapshot():
-    gate = LogGate("closed")
+    gate = WindowGate("closed")
     assert gate.gated(("g", 20001)) is True
 
 
 def test_open_policy_never_gates_when_unknown():
-    gate = LogGate("open")
+    gate = WindowGate("open")
     assert gate.gated(("g", 20001)) is False
 
 
 def test_incremental_reports_do_not_end_the_unknown_state():
-    gate = LogGate("closed")
+    gate = WindowGate("closed")
     assert gate.feed(_line("new", on=1, gid=7)) is True
     assert gate.gated(("g", 7)) is True
     # One report proves the channel works, but it is not the full picture, so every *other*
@@ -73,7 +76,7 @@ def test_incremental_reports_do_not_end_the_unknown_state():
 
 
 def test_snapshot_is_authoritative_and_clears_stale_entries():
-    gate = LogGate("closed")
+    gate = WindowGate("closed")
     gate.feed(_line("new", on=1, gid=7))
     gate.feed(_line("snapshot", on=1, gid=9))
     gate.feed(_line("snapshot-end"))
@@ -82,7 +85,7 @@ def test_snapshot_is_authoritative_and_clears_stale_entries():
 
 
 def test_off_then_on_toggles_a_single_window():
-    gate = LogGate("closed")
+    gate = WindowGate("closed")
     gate.feed(_line("snapshot-end"))
     assert gate.gated(("g", 7)) is False
     gate.feed(_line("on", on=1, gid=7))
@@ -92,7 +95,7 @@ def test_off_then_on_toggles_a_single_window():
 
 
 def test_private_and_channel_windows_use_their_own_keys():
-    gate = LogGate("closed")
+    gate = WindowGate("closed")
     gate.feed(_line("snapshot", on=1, uid=555))
     gate.feed(_line("snapshot", on=1, chid=666))
     gate.feed(_line("snapshot-end"))
@@ -102,27 +105,103 @@ def test_private_and_channel_windows_use_their_own_keys():
 
 
 def test_grace_period_releases_the_closed_default():
-    gate = LogGate("closed", grace_s=0.0)
+    gate = WindowGate("closed", grace_s=0.0)
     gate.arm()
     assert gate.gated(("g", 7)) is False, "without any report the gate must give up, not mute forever"
 
 
 def test_gate_accepts_string_and_int_ids_interchangeably():
-    gate = LogGate("closed")
+    gate = WindowGate("closed")
     gate.feed(_line("snapshot", on=1, gid=7))
     gate.feed(_line("snapshot-end"))
     assert gate.gated(("g", 7)) is True
 
 
+def test_repeated_keys_do_not_override_the_first_occurrence():
+    # Dice's session=/name= are free text; a later on=/action= must not be able to rewrite them
+    line = f"{LOGSTATE_MARK} v1 on=1 action=new session=x action=snapshot-end name=n"
+    got = WindowGate.parse(line)
+    assert got["action"] == "new" and got["on"] == "1" and got["name"] == "n"
+
+
+# ========================================================== unit: WindowGate (switches)
+
+def test_switch_default_passes_and_any_off_switch_gates():
+    gate = WindowGate("closed")
+    gate.feed(_line("snapshot-end"))
+    window = ("g", 20001)
+    assert gate.gated(window) is False, "bot on / reply on / log off is the default and passes"
+    gate.feed(_line("switch", bot=0, gid=20001))
+    assert gate.gated(window) is True and gate.reason(window) == "bot off"
+    gate.feed(_line("switch", reply=0, gid=20001))
+    assert gate.gated(window) is True and gate.reason(window) == "reply off"
+    gate.feed(_line("switch", gid=20001))
+    assert gate.gated(window) is False and gate.reason(window) == ""
+
+
+def test_a_report_without_the_switch_fields_is_log_only():
+    # an older Dice build sends no bot=/reply=; the gate must then behave as it always did
+    gate = WindowGate("closed")
+    gate.feed(_line("snapshot-end"))
+    assert gate.gated(("g", 20001)) is False
+    gate.feed(_line("on", on=1, gid=20001))
+    assert gate.reason(("g", 20001)) == "TRPG session"
+    gate.feed(_line("off", on=0, gid=20001))
+    assert gate.gated(("g", 20001)) is False
+
+
+def test_snapshot_is_authoritative_and_clears_stale_switch_entries():
+    gate = WindowGate("closed")
+    gate.feed(_line("switch", bot=0, gid=7))
+    gate.feed(_line("snapshot", reply=0, gid=9))
+    gate.feed(_line("snapshot-end"))
+    assert gate.gated(("g", 7)) is False, "a window absent from the snapshot must be released"
+    assert gate.reason(("g", 9)) == "reply off"
+
+
+def test_reason_joins_every_firing_switch():
+    gate = WindowGate("closed")
+    gate.feed(_line("snapshot-end"))
+    gate.feed(_line("switch", on=1, bot=0, gid=7))
+    assert gate.reason(("g", 7)) == "TRPG session+bot off"
+    gate.feed(_line("switch", on=1, bot=0, reply=0, gid=7))
+    assert set(gate.reason(("g", 7)).split("+")) == {"TRPG session", "bot off", "reply off"}
+
+
+def test_a_switch_condition_can_be_dropped_in_config():
+    only_reply = WindowGate("closed", gate_bot=False)
+    only_reply.feed(_line("snapshot-end"))
+    only_reply.feed(_line("switch", bot=0, gid=7))
+    assert only_reply.gated(("g", 7)) is False, "bot off is recorded but must not gate here"
+    only_reply.feed(_line("switch", bot=0, reply=0, gid=7))
+    assert only_reply.reason(("g", 7)) == "reply off"
+    only_bot = WindowGate("closed", gate_reply=False)
+    only_bot.feed(_line("snapshot-end"))
+    only_bot.feed(_line("switch", bot=0, reply=0, gid=7))
+    assert only_bot.reason(("g", 7)) == "bot off"
+    log_only = WindowGate("closed", gate_bot=False, gate_reply=False)
+    log_only.feed(_line("snapshot-end"))
+    log_only.feed(_line("switch", bot=0, reply=0, gid=7))
+    assert log_only.gated(("g", 7)) is False, "that is the log-only gate of an older config"
+
+
+def test_blocked_wording_names_every_cause():
+    assert "跑团" in _blocked_wording("TRPG session")
+    assert "静默" in _blocked_wording("bot off")
+    assert "禁用回复" in _blocked_wording("reply off")
+    both = _blocked_wording("TRPG session+bot off")
+    assert "跑团" in both and "静默" in both
+
+
 # ====================================================================== unit: routing decisions
 
-def _bridge(gate: LogGate, **kw) -> RelayBridge:
+def _bridge(gate: WindowGate, **kw) -> RelayBridge:
     cfg = BridgeCfg(**kw)
     return RelayBridge(cfg, link=None, gate=gate)  # type: ignore[arg-type]
 
 
 def test_only_message_actions_have_a_target():
-    br = _bridge(LogGate("closed"))
+    br = _bridge(WindowGate("closed"))
     assert br.target_of("send_group_msg", {"group_id": 20001}) == ("g", 20001)
     assert br.target_of("send_group_forward_msg", {"group_id": 20001}) == ("g", 20001)
     assert br.target_of("send_msg", {"group_id": 20001}) == ("g", 20001)
@@ -134,16 +213,16 @@ def test_only_message_actions_have_a_target():
 
 
 def test_private_targets_are_gated_only_when_opted_in():
-    off = _bridge(LogGate("closed"))
+    off = _bridge(WindowGate("closed"))
     assert off.target_of("send_private_msg", {"user_id": 5}) is None
     assert off.target_of("send_msg", {"user_id": 5}) is None
-    on = _bridge(LogGate("closed"), gate_private=True)
+    on = _bridge(WindowGate("closed"), gate_private=True)
     assert on.target_of("send_private_msg", {"user_id": 5}) == ("u", 5)
     assert on.target_of("send_msg", {"user_id": 5}) == ("u", 5)
 
 
 def test_message_sent_is_never_relayed_by_default():
-    gate = LogGate("closed")
+    gate = WindowGate("closed")
     gate.feed(_line("snapshot-end"))
     br = _bridge(gate)
     assert br._withheld({"post_type": "message_sent", "message_type": "group", "group_id": 1})
@@ -156,7 +235,7 @@ def test_message_sent_is_never_relayed_by_default():
 
 
 def test_events_are_withheld_only_for_recording_groups():
-    gate = LogGate("closed")
+    gate = WindowGate("closed")
     gate.feed(_line("snapshot", on=1, gid=20001))
     gate.feed(_line("snapshot-end"))
     br = _bridge(gate)
@@ -166,6 +245,34 @@ def test_events_are_withheld_only_for_recording_groups():
     # notices/requests are not messages and must always pass
     assert br._withheld({"post_type": "notice", "notice_type": "group_increase", "group_id": 20001}) == ""
     assert br._withheld({"post_type": "request", "request_type": "friend", "group_id": 20001}) == ""
+
+
+def _bootstrapped_gate(gate_bot: bool = True, gate_reply: bool = True) -> WindowGate:
+    """A gate that has finished its snapshot with an empty table (every window at default)."""
+    gate = WindowGate("closed", gate_bot=gate_bot, gate_reply=gate_reply)
+    gate.feed(_line("snapshot-end"))
+    return gate
+
+
+def test_a_switched_off_group_is_withheld_without_any_logging():
+    gate = _bootstrapped_gate()
+    gate.feed(_line("switch", bot=0, gid=20001))
+    br = _bridge(gate)
+    assert br._withheld({"post_type": "message", "message_type": "group", "group_id": 20001}) == "bot off"
+    assert br._withheld({"post_type": "message", "message_type": "group", "group_id": 999}) == ""
+    # private windows have no bot/reply switch, so they must stay released
+    assert br._withheld({"post_type": "message", "message_type": "private", "user_id": 20001}) == ""
+
+
+def test_a_gate_switch_can_be_ignored_without_rebuilding_dice():
+    gate = _bootstrapped_gate(gate_bot=False)
+    gate.feed(_line("switch", bot=0, reply=0, gid=20001))
+    assert _bridge(gate)._withheld({"post_type": "message", "message_type": "group",
+                                    "group_id": 20001}) == "reply off"
+    quiet = _bootstrapped_gate(gate_bot=False, gate_reply=False)
+    quiet.feed(_line("switch", bot=0, reply=0, gid=20001))
+    assert _bridge(quiet)._withheld({"post_type": "message", "message_type": "group",
+                                     "group_id": 20001}) == ""
 
 
 # ====================================================================== unit: token / path auth
@@ -191,7 +298,7 @@ def _authorize(br: RelayBridge, path: str = "/", headers: dict | None = None):
 
 
 def test_relay_requires_the_token_when_one_is_configured():
-    br = _bridge(LogGate("closed"), access_token="s3cret")
+    br = _bridge(WindowGate("closed"), access_token="s3cret")
     # accepted: standard Bearer, the Token scheme the upstream also takes, and the query form
     assert _authorize(br)[0] == "reject", "no credentials must be refused"
     for headers in ({"Authorization": "Bearer s3cret"}, {"Authorization": "Token s3cret"}):
@@ -209,13 +316,13 @@ def test_relay_requires_the_token_when_one_is_configured():
 
 
 def test_relay_without_a_token_accepts_any_client():
-    br = _bridge(LogGate("closed"))
+    br = _bridge(WindowGate("closed"))
     assert _authorize(br)[0] is None
     assert _authorize(br, headers={"Authorization": "Bearer whatever"})[0] is None
 
 
 def test_relay_enforces_its_path():
-    br = _bridge(LogGate("closed"), path="/ob")
+    br = _bridge(WindowGate("closed"), path="/ob")
     assert _authorize(br, "/ob")[0] is None
     assert _authorize(br, "/ob/")[0] is None
     assert _authorize(br, "/ob?x=1")[0] is None
@@ -453,3 +560,52 @@ def test_relay_end_to_end(relay):
         time.sleep(2.0)
     assert len(ml.group_events(GROUP)) > seen, "relaying did not resume after .log off"
     assert ml.request("send_group_msg", {"group_id": GROUP, "message": "ok-again"})["status"] != "failed"
+
+
+@needs_dll
+def test_relay_end_to_end_switches(relay):
+    """The .bot / .reply switches gate the relay exactly like a TRPG session does."""
+    upstream, ml, _, _ = relay
+    _dice_up(upstream)
+    upstream.group_message(".bot")  # a real group message for the relay to consider
+    _wait(lambda: ml.group_events(GROUP), what="a relayed group message before .bot off")
+
+    # 1) .bot off blinds the external bot in both directions...
+    upstream.group_message(".bot off")
+    upstream.wait_for("send_group_msg", "关闭", timeout=30)
+    seen = len(ml.group_events(GROUP))
+    upstream.group_message("while muted")
+    time.sleep(2.5)
+    assert len(ml.group_events(GROUP)) == seen, "a group message leaked while .bot off"
+    blocked = ml.request("send_group_msg", {"group_id": GROUP, "message": "muted-send"})
+    assert blocked["status"] == "failed" and blocked["retcode"] != 0, blocked
+    assert upstream.find("send_group_msg", "muted-send") == [], "a blocked send reached the protocol端"
+    # ...while queries and other actions still work, as in a TRPG session.
+    assert ml.request("get_group_list")["data"]
+
+    # 2) .bot on gives it back (bot commands bypass the muted state on the Dice side).
+    upstream.group_message(".bot on")
+    upstream.wait_for("send_group_msg", "开启", timeout=30)
+    seen = len(ml.group_events(GROUP))
+    deadline = time.monotonic() + 24
+    while time.monotonic() < deadline and len(ml.group_events(GROUP)) == seen:
+        upstream.group_message("after unmute")
+        time.sleep(2.0)
+    assert len(ml.group_events(GROUP)) > seen, "relaying did not resume after .bot on"
+
+    # 3) .reply off silences it again, and .reply on restores it.
+    upstream.group_message(".reply off")
+    upstream.wait_for("send_group_msg", "禁用关键词回复", timeout=30)
+    seen = len(ml.group_events(GROUP))
+    upstream.group_message("while reply off")
+    time.sleep(2.5)
+    assert len(ml.group_events(GROUP)) == seen, "a group message leaked while .reply off"
+    assert ml.request("send_group_msg", {"group_id": GROUP, "message": "reply-off-send"})["status"] == "failed"
+    upstream.group_message(".reply on")
+    upstream.wait_for("send_group_msg", "关键词回复", timeout=30)
+    seen = len(ml.group_events(GROUP))
+    deadline = time.monotonic() + 24
+    while time.monotonic() < deadline and len(ml.group_events(GROUP)) == seen:
+        upstream.group_message("after reply on")
+        time.sleep(2.0)
+    assert len(ml.group_events(GROUP)) > seen, "relaying did not resume after .reply on"

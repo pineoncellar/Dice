@@ -853,8 +853,13 @@ LUADEF(setGroupConf) {
 	}
 	else if (lua_isnoneornil(L, 3)) {
 		grp.reset(item);
+		if (isGateSwitch(item))report_chat_switch(id);
 	}
-	else grp.set(item, lua_to_attr(L, 3));
+	else {
+		grp.set(item, lua_to_attr(L, 3));
+		//群门控开关被插件改写时同步给宿主(其余配置项与门控无关)
+		if (isGateSwitch(item))report_chat_switch(id);
+	}
 	return 0;
 }
 LUADEF(getUserConf) {

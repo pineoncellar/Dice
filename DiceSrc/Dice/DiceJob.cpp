@@ -291,6 +291,8 @@ void clear_group(AttrObject job) {
 		for (const auto& id : GrpDelete) {
 			ChatList.erase(id);
 			if (sessions.has_session({ 0,id }))sessions.over({ 0,id });
+			//群记录已回收: 开关随之回到默认,此时上报才能让宿主解除门控
+			report_chat_switch(id, "clear");
 		}
 		MsgNote(job, "清查群聊时回收不活跃记录" + to_string(GrpDelete.size()) + "条", 0b1);
 	}

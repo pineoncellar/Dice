@@ -110,30 +110,43 @@ port    = 6701      # 可自定义；端口不与 [onebot] reverse 冲突即可
 | 上行（麦bot → 协议端） | 逐个 action 透传；驱动换成自己的 echo 发往上游，再把上游的响应帧（`status`/`retcode`/`data`/`wording`）**原样**用麦bot 的 echo 还回去 |
 | 下行（协议端 → 麦bot） | 事件逐条转发；`message_sent` 默认不发（同号时无法分辨是谁发的，发下去会让两边互相回话） |
 
-**唯一的过滤条件是"消息收发"**：某个聊天正在跑团（Dice 开了 `.log` 记录）时，该聊天的
-**群消息事件不下发**、并且麦bot 发往该群的**消息被拒绝**（返回 `status=failed` + 非 0 retcode）。
+**唯一的过滤条件是"消息收发"**：某个聊天窗口处于**非默认态**时——Dice 正在跑团（`.log` 记录中）、
+或该群的开关失效（`.bot off` / `.reply off`）——该窗口的**群消息事件不下发**、并且麦bot 发往该窗口的
+**消息被拒绝**（返回 `status=failed` + 非 0 retcode）。
 `get_*` 查询、群管理、`delete_msg` 等**一律照常透传**——中转不限制麦bot 的能力，只掐消息。
 
-跑团状态来自 Dice 的 `@dice.logstate` 上报（见 `DiceSrc/docs/DiceDriver-interface-duties.md` §4.4）：
+三个开关与默认态：
+
+| 开关 | 默认 | 失效（拦截） | Dice 侧依据 |
+|---|---|---|---|
+| bot | 开 | `.bot off`（群管） | 群记录 `停用指令` |
+| reply | 开 | `.reply off`（群管/信任） | 群记录 `禁用回复` |
+| log | 关 | `.log new` / `.log on` | `isLogging` |
+
+窗口开关状态来自 Dice 的 `@dice.logstate` 上报（见 `DiceSrc/docs/DiceDriver-interface-duties.md` §4.4），
+报文里三个开关同一条：`on=`（跑团）、`bot=`、`reply=`。
 
 - Dice 启动时先发一份**全量快照**（`action=snapshot` 若干条 + `action=snapshot-end` 一条终止行），
-  驱动据此重建状态；之后 `.log new|on|off|end` 逐条增量上报。
+  驱动据此重建状态；之后 `.log` 变化、`.bot`/`.reply`/`.group` 改动开关、群记录回收都会逐条增量上报。
 - **快照之前状态未知**，此时按 `on_unknown = "closed"` 一律拦截（更安全）。若始终收不到任何上报
   （例如 Dice DLL 版本过旧），超过 `snapshot_grace_s` 后会放弃该默认并打一条 warning——
   避免麦bot 被永久静音。
-- 上报在 Dice 侧是**同步**调用，且排在 mod 脚本分发之前，所以"开启记录的那条消息本身"就已经被拦住，
+- 上报在 Dice 侧是**同步**调用，且排在 mod 脚本分发之前，所以"开启记录/静音的那条消息本身"就已经被拦住，
   不存在错位一条消息的窗口。
-- 因此 **Dice DLL 与驱动必须成对升级**：只有新的 DLL 才会发这份上报。
+- 老版本 DLL 的报文没有 `bot=`/`reply=`，驱动按"两者皆 on"处理，即退化为只按 log 门控；
+  但 **`.bot off` / `.reply off` 的门控需要新的 DLL**，因此 **Dice DLL 与驱动建议成对升级**。
+- 插件绕过命令入口直写群记录（如 JS/Python 直接写上下文对象）时，宿主要到下一次启动快照才会看到。
 
 排查门控是否已就绪：
 
-- Dice 侧：`.admin bridge this state` 查看当前窗口（`g[群号]` 换群聊、省略 g 按私聊 QQ 号），
-  `.admin bridge list` 列出上报集合里每个窗口及其拦截结论。输出里 `上报通道` 显示 `未注册` 或
-  `启动快照` 显示 `未发出`，就说明宿主还没收到任何上报，此时驱动按 `on_unknown` 一律拦截。
-- 驱动侧：`[log] level = "trace"` 时每条报文都会记一行 `logstate <action> -> <snapshot|unknown>, N recording: [...]`，
+- Dice 侧：`.admin bridge this state` 查看当前窗口的三个开关与门控结论（`g[群号]` 换群聊、省略 g 按私聊 QQ 号），
+  `.admin bridge list` 列出上报集合（正在记录的窗口 + 开关失效的群窗口）及各自结论。输出里 `上报通道` 显示
+  `未注册` 或 `启动快照` 显示 `未发出`，就说明宿主还没收到任何上报，此时驱动按 `on_unknown` 一律拦截。
+- 驱动侧：`[log] level = "trace"` 时每条报文都会记一行 `logstate <action> -> <snapshot|unknown>, N not-default: [...]`，
   重建完成（出现 `snapshot`）之后门控才按真实状态行事。
 
-其余可调项：`gate_private`（是否也拦截绑到跑团会话的私聊，默认只拦群消息）、
+其余可调项：`gate_bot` / `gate_reply`（是否把这两个开关计入门控，默认 true；置 false 即可退回"只按 log 门控"，
+不必改 Dice）、`gate_private`（是否也拦截绑到跑团会话的私聊，默认只拦群消息）、
 `access_token`（与 `[onebot]` 各自独立）、`queue_limit`（单客户端积压上限，超出即丢，防止慢客户端拖垮驱动）。
 
 ## 便携包：搬到没有开发环境的机器
