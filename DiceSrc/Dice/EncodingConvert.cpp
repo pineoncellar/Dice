@@ -146,6 +146,45 @@ std::string UTF8toGBK(const std::string& strUTF8, bool isTrial)
 	return ConvertEncoding<char>(strUTF8, "utf-8", "gb18030");
 #endif
 }
+// 严格校验，与 checkUTF8 的区别有两点：checkUTF8 只看前 10 个多字节序列就下结论，
+// 且把纯 ASCII 也判为"非 UTF-8"。这里全串扫描并拒绝过长编码、代理区与越界码点，
+// 使 isUTF8() 的结论与下面两个转换函数的行为完全一致。
+bool isUTF8(const std::string& str) {
+	const auto* p{ reinterpret_cast<const unsigned char*>(str.data()) };
+	const auto* const end{ p + str.size() };
+	while (p < end) {
+		const unsigned char c{ *p };
+		unsigned int cp{ 0 };
+		size_t extra{ 0 };
+		if (c < 0x80) { ++p; continue; }						// ASCII
+		else if ((c & 0xE0) == 0xC0) { extra = 1; cp = c & 0x1F; }
+		else if ((c & 0xF0) == 0xE0) { extra = 2; cp = c & 0x0F; }
+		else if ((c & 0xF8) == 0xF0) { extra = 3; cp = c & 0x07; }
+		else return false;										// 续字节或非法首字节
+		if (static_cast<size_t>(end - p) <= extra)return false;	// 尾部被截断
+		for (size_t i{ 1 }; i <= extra; ++i) {
+			const unsigned char t{ p[i] };
+			if ((t & 0xC0) != 0x80)return false;
+			cp = (cp << 6) | (t & 0x3F);
+		}
+		// 排除过长编码，否则同一字符有多种表示
+		if ((extra == 1 && cp < 0x80) || (extra == 2 && cp < 0x800) || (extra == 3 && cp < 0x10000))
+			return false;
+		if (cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF))return false;
+		p += extra + 1;
+	}
+	return true;
+}
+std::string GB18030toUTF8(const std::string& src) {
+	if (src.empty() || isUTF8(src))return src;
+	std::string ret{ GBKtoUTF8(src) };
+	return ret.empty() ? src : ret;		// 转换失败时退回原串，绝不返回空串
+}
+std::string UTF8toGB18030(const std::string& src) {
+	if (src.empty() || !isUTF8(src))return src;
+	std::string ret{ UTF8toGBK(src) };
+	return ret.empty() ? src : ret;
+}
 std::string UTF8toLocal(const std::string& str) {
 #ifdef _WIN32
 	return UTF8toGBK(str);

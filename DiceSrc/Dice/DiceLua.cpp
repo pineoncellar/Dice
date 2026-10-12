@@ -1509,6 +1509,46 @@ int luaopen_http(lua_State* L) {
 	return 1;
 }
 
+// ---------------- 编码桥 enc ----------------
+// 插件从外部拿到的字节（控制台命令输出、第三方程序、外部文件）往往是 GB18030，
+// 而本 state 的字符串编码由插件文件的存盘编码决定，两者不一定一致。直接拼接会在
+// 同一个 state 里造成混合编码，返回给 Dice 时被整体再转一次，结果是双重编码乱码。
+// 所以这里不返回"固定的 UTF-8"，而是返回"本 state 该用的字符串"：这样在插件文件
+// 存 UTF-8 或存 GBK 两种情形下都正确，也能与 state 内的其它字面量安全拼接。
+int encFromGb18030(lua_State* L) {
+	string raw{ lua_to_raw_string(L, 1) };
+	if (isUTF8(raw)) {
+		// 已是合法 UTF-8：可能是调用方声明错了方向，或外部本来就给的 UTF-8。
+		// 按 state 编码落地即可，绝不能当 GB18030 再解一遍。
+		lua_push_u8string(L, raw);
+	}
+	else {
+		lua_push_gbstring(L, raw);
+	}
+	return 1;
+}
+// 反向：需要 GB18030 字节时用（喂控制台命令、写 GBK 文件等）
+int encToGb18030(lua_State* L) {
+	string raw{ lua_to_raw_string(L, 1) };
+	lua_push_raw_string(L, UTF8Luas.count(L) ? UTF8toGB18030(raw) : raw);
+	return 1;
+}
+int encIsUtf8(lua_State* L) {
+	lua_pushboolean(L, isUTF8(lua_to_raw_string(L, 1)));
+	return 1;
+}
+
+static const luaL_Reg enc_funcs[] = {
+	{"fromGb18030", encFromGb18030},
+	{"toGb18030", encToGb18030},
+	{"isUtf8", encIsUtf8},
+	{NULL, NULL}
+};
+int luaopen_enc(lua_State* L) {
+	luaL_newlib(L, enc_funcs);
+	return 1;
+}
+
 #define REGIST(func) {#func, lua_dice_##func},
 
 void LuaState::regist() {
@@ -1547,6 +1587,7 @@ void LuaState::regist() {
 		{"SelfData", luaopen_SelfData},
 		{"Actor", luaopen_Actor},
 		{"http", luaopen_http},
+		{"enc", luaopen_enc},
 		{NULL, NULL}
 	};
 	for (const luaL_Reg* lib = Dicelibs; lib->func; lib++) {

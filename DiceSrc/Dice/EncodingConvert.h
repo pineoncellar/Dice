@@ -49,6 +49,15 @@ std::string GBKtoLocal(const std::string& strGBK);
 std::string LocaltoGBK(const std::string& str);
 std::string GBKtoUTF8(const std::string& strGBK, bool isTrial = false);
 std::string UTF8toGBK(const std::string& strUTF8, bool isTrial = false);
+
+// 面向插件与跨边界调用的显式转换。名称里带 18030 是刻意的：
+// 本工程里 CP_GBK 同时存在 936 与 54936 两个取值，而 936 无法表示 emoji 与生僻字
+// (会静默变成 "??")，所以对外只承认 GB18030 一种。
+// 两个方向的入参若本身已是合法 UTF-8 (或本就不是 UTF-8)，一律原样返回，
+// 使调用方即使把方向声明错，也不会破坏已经正确的数据。
+bool isUTF8(const std::string& str);
+std::string GB18030toUTF8(const std::string& src);
+std::string UTF8toGB18030(const std::string& src);
 /*
 std::vector<std::string> GBKtoUTF8(const std::vector<std::string>& strGBK);
 template <typename K, typename V>
