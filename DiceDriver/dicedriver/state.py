@@ -69,11 +69,19 @@ class Flag:
     sub_type: str = ""
 
 
-def _atomic_write(path: Path, data: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+def _atomic_write(path: Path, data: dict) -> bool:
+    """Atomic JSON write. Returns False, touching nothing, when the parent directory is missing.
+
+    The parent is never created. This state lives in <root_dir>\\Dice<QQ>\\user, and planting
+    that directory before Dice does would skip Dice's own DiceData -> Dice<QQ> rename and
+    orphan whatever the user already had there.
+    """
+    if not path.parent.is_dir():
+        return False
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    tmp.write_text(json.dumps(data, indent=4, ensure_ascii=False), encoding="utf-8")
     os.replace(tmp, path)
+    return True
 
 
 def _read_json(path: Path) -> dict:
@@ -87,10 +95,10 @@ def _read_json(path: Path) -> dict:
 
 
 class State:
-    def __init__(self, bot, cache_cfg, state_dir: Path, clock: Callable[[], float] = time.time):
+    def __init__(self, bot, cache_cfg, clock: Callable[[], float] = time.time):
         self.bot = bot
         self.cfg = cache_cfg
-        self.dir = state_dir
+        self.dir: Path | None = None  # bound once the QQ is known; see bind()
         self.now = clock
         self._lock = threading.RLock()
 
@@ -113,19 +121,38 @@ class State:
         self._group_flags: dict[int, Flag] = {}
         self._last_group_refresh = self.now()
 
-        self._load_persistent()
-
     # ------------------------------------------------------------------ persistence
 
+    def bind(self, state_dir: Path) -> None:
+        """Point the state at its directory and load what is there.
+
+        Called from App._startup once OneBot has told us the account, because the directory is
+        <root_dir>/Dice<QQ>/user and the QQ is not known any earlier. Creates nothing.
+        """
+        self.dir = Path(state_dir)
+        self._load_persistent()
+
     def _load_persistent(self) -> None:
-        raw = _read_json(self.dir / "last_speak.json")
-        for gid, users in raw.items():
-            self._last_speak[int(gid)] = {int(u): int(t) for u, t in users.items()}
-        self._whole_ban = {int(g): float(t) for g, t in _read_json(self.dir / "whole_ban.json").items()}
+        # update(), never replace: rebinding must not drop entries that are in memory but not yet
+        # flushed. bind() runs once per process today, so in practice this only ever adds.
+        try:
+            raw = _read_json(self.dir / "last_speak.json")
+            self._last_speak.update({int(gid): {int(u): int(t) for u, t in users.items()}
+                                     for gid, users in raw.items()})
+        except (AttributeError, TypeError, ValueError) as e:
+            # a hand-edited file must cost us the table, not the startup
+            log.warning("last_speak.json unreadable, keeping what we have: %s", e)
+        try:
+            raw = _read_json(self.dir / "whole_ban.json")
+            self._whole_ban.update({int(g): float(t) for g, t in raw.items()})
+        except (AttributeError, TypeError, ValueError) as e:
+            log.warning("whole_ban.json unreadable, keeping what we have: %s", e)
         log.info("state loaded: last_speak groups=%d, pending whole-bans=%d",
                  len(self._last_speak), len(self._whole_ban))
 
     def flush(self, force: bool = False) -> None:
+        if self.dir is None:
+            return
         with self._lock:
             if not (self._last_speak_dirty or force):
                 return
@@ -133,16 +160,20 @@ class State:
             self._last_speak_dirty = False
             self._last_flush = self.now()
         try:
-            _atomic_write(self.dir / "last_speak.json", snapshot)
+            if not _atomic_write(self.dir / "last_speak.json", snapshot):
+                self._last_speak_dirty = True
         except OSError as e:
             log.error("failed to write last_speak.json: %s", e)
             self._last_speak_dirty = True
 
     def _save_whole_ban(self) -> None:
+        if self.dir is None:
+            return
         with self._lock:
             snapshot = {str(g): t for g, t in self._whole_ban.items()}
         try:
-            _atomic_write(self.dir / "whole_ban.json", snapshot)
+            if not _atomic_write(self.dir / "whole_ban.json", snapshot):
+                log.warning("whole_ban.json not written: %s does not exist yet", self.dir)
         except OSError as e:
             log.error("failed to write whole_ban.json: %s", e)
 

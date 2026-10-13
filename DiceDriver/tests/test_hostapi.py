@@ -1,5 +1,6 @@
 """HostApi behaviour against a fake OneBot bot (no DLL involved)."""
 
+import json
 import logging
 import time
 from pathlib import Path
@@ -62,7 +63,10 @@ def env(tmp_path):
     cfg = config.from_dict({}, tmp_path)
     bot = FakeBot()
     clock = Clock()
-    st = State(bot, cfg.cache, tmp_path / "state", clock)
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    st = State(bot, cfg.cache, clock)
+    st.bind(state_dir)
     life, notif, hb = Life(), Sink(), Sink()
     api = HostApi(cfg, bot, st, notif, hb, life)
     bot.sync["get_group_member_list"] = [
@@ -161,7 +165,8 @@ def test_last_speak_persists(env, tmp_path):
     api, bot, st, _, _, _, clock, cfg = env
     st.note_speak(9, 2, 777)
     st.flush()
-    again = State(bot, cfg.cache, tmp_path / "state", clock)
+    again = State(bot, cfg.cache, clock)
+    again.bind(tmp_path / "state")
     assert again.last_speak(9, 2) == 777
 
 
@@ -239,7 +244,8 @@ def test_whole_ban_persisted_and_lifted(env, tmp_path):
     call(api, "SetGroupWholeBan", 100, 9, 30)
     assert bot.nowait[-1] == ("set_group_whole_ban", {"group_id": 9, "enable": True})
     # a restarted driver reloads the expiry from disk and lifts it when due
-    again = State(bot, cfg.cache, tmp_path / "state", clock)
+    again = State(bot, cfg.cache, clock)
+    again.bind(tmp_path / "state")
     clock.t += 31
     bot.sync["set_group_whole_ban"] = None
     again.tick()
@@ -323,3 +329,48 @@ def test_handler_exception_returns_fallback(env):
     assert call(api, "IsGroupAdmin", 100, 9, 1, 0).ret == 0
     assert call(api, "GetGroupLastMsg", 100, 9, 1).ret == -1
     assert call(api, "GetGroupAuth", 100, 9, 1).ret == 0
+
+
+# ------------------------------------------------- 状态目录绑定：驱动不得替 Dice 建目录
+
+def test_state_before_bind_is_silent(tmp_path):
+    d = tmp_path / "Dice123" / "user"
+    st = State(FakeBot(), config.from_dict({}, tmp_path).cache, Clock())
+    st.note_speak(9, 2, 777)
+    st.set_whole_ban_expiry(9, 1.0)             # 两个写入方都不得碰磁盘
+    st.flush(force=True)
+    assert not list(tmp_path.iterdir())         # 不落盘、不建目录
+    st.bind(d)                                  # 目录不存在时 bind 也不得创建它
+    assert not d.exists()
+    assert st.last_speak(9, 2) == 777           # 内存里记下的数据还在
+
+
+def test_flush_does_not_create_the_directory(tmp_path):
+    target = tmp_path / "Dice123" / "user"     # 故意不存在
+    st = State(FakeBot(), config.from_dict({}, tmp_path).cache, Clock())
+    st.bind(target)
+    st.note_speak(9, 2, 777)
+    st.flush(force=True)
+    assert not target.exists()
+    assert not (tmp_path / "Dice123").exists()
+
+
+def test_bind_loads_and_flush_writes_pretty_json(tmp_path):
+    d = tmp_path / "user"
+    d.mkdir()
+    st = State(FakeBot(), config.from_dict({}, tmp_path).cache, Clock())
+    st.bind(d)
+    st.note_speak(9, 2, 777)
+    st.flush(force=True)
+    text = (d / "last_speak.json").read_text(encoding="utf-8")
+    assert text == json.dumps({"9": {"2": 777}}, indent=4, ensure_ascii=False)
+
+
+def test_malformed_state_file_does_not_break_bind(tmp_path):
+    d = tmp_path / "user"
+    d.mkdir()
+    (d / "last_speak.json").write_text('{"9": {"oops": 1}}', encoding="utf-8")
+    (d / "whole_ban.json").write_text('[]', encoding="utf-8")   # 顶层是数组而不是对象
+    st = State(FakeBot(), config.from_dict({}, tmp_path).cache, Clock())
+    st.bind(d)                                  # 不得抛异常
+    assert st.last_speak(9, 2) == -1

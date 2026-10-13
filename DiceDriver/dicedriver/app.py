@@ -47,7 +47,7 @@ class App:
 
         self.executor = ThreadPoolExecutor(max_workers=cfg.driver.pool_size, thread_name_prefix="dd-worker")
         self.link = OneBotLink(cfg.onebot, self._on_event, self._on_connected, self._on_disconnected)
-        self.state = State(self.link, cfg.cache, cfg.resolve(cfg.driver.state_dir))
+        self.state = State(self.link, cfg.cache)
         self.notifier = Notifier(cfg.notify, self.link)
         self.heartbeat = Heartbeat(cfg.heartbeat)
         self.gate = WindowGate(cfg.bridge.on_unknown, cfg.bridge.snapshot_grace_s,
@@ -159,7 +159,9 @@ class App:
         logs.bind_dice_log(self.cfg, self_id)
         log.info("OneBot account %d connected; starting Dice", self_id)
         self.root_dir.mkdir(parents=True, exist_ok=True)
-        self.state.dir.mkdir(parents=True, exist_ok=True)
+        # Dice<QQ>\user belongs to Dice, which creates it while starting up; binding only reads,
+        # so that a legacy DiceData directory still gets its one-time rename.
+        self.state.bind(self.root_dir / f"Dice{self_id}" / "user")
         self.native.load()
         if not self.state.refresh_groups():
             log.error("group list unavailable at startup; Dice will see no groups until the next refresh")

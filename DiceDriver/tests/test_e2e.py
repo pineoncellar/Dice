@@ -136,6 +136,6 @@ def test_graceful_stop_flushes_state_and_exits_zero(session):
     assert proc.wait(60) == 0
     log = (work / "logs" / "dicedriver.log").read_text(encoding="utf-8")
     assert "stopping Dice" in log and "driver exiting (code 0)" in log
-    state = work / "state" / "last_speak.json"
+    state = work / "data" / f"Dice{BOT_QQ}" / "user" / "last_speak.json"
     assert state.exists() and str(MASTER_QQ) in state.read_text(encoding="utf-8")
 
