@@ -33,7 +33,9 @@ namespace RandomGenerator {
 
 	//随机数模式：0-伪随机（默认）；1-真随机（random.org取数缓存，池空或取数失败自动降级）
 	void Configure(int mode);
-	//载入本地真随机数池，须在DiceDir就绪后调用
+	//载入本地真随机数池，须在DiceDir就绪后调用。
+	//文件格式v2：{"version":2,"bitBuf":n,"bitCnt":n,"words":["<base64分片>",...]}，
+	//words是池字节XOR固定密钥后拼上4字节校验和的base64，分片仅为可读性；v1的明文整数数组不再支持
 	void Load(const std::filesystem::path& cacheFile);
 	//有变化时保存池，没有变化则什么都不做
 	void Save();

@@ -21,6 +21,7 @@
  * program. If not, see <http://www.gnu.org/licenses/>.
  */
 #include "RandomGenerator.h"
+#include "CQTools.h"
 #include "DiceNetwork.h"
 #include "json.hpp"
 #include <algorithm>
@@ -302,6 +303,92 @@ namespace
 		return dis(gen);
 	}
 
+	//池文件v2：外壳仍是JSON，words变成base64分片数组。密钥写死在二进制里——它挡的是
+	//"随手打开看一眼、顺手改两笔"，不是反编译；能反编译的服主也不会走改文件这条路
+	constexpr int kPoolVersion{ 2 };
+	constexpr int kPoolChunk{ 76 };
+	constexpr unsigned char kPoolKey[]{
+		0x7E, 0xD3, 0x1A, 0x94, 0x2F, 0xB8, 0x51, 0xC6,
+		0x0D, 0xA2, 0x63, 0xF0, 0x39, 0x8E, 0x15, 0xCC,
+		0x47, 0xBA, 0x03, 0x96, 0x2B, 0xD8, 0x6F, 0xE4,
+		0x1D, 0x82, 0x5B, 0xA0, 0x37, 0xFE, 0x69, 0xC4,
+	};
+	constexpr size_t kPoolKeyLen{ sizeof(kPoolKey) };
+
+	uint32_t fnv1a32(const std::vector<unsigned char>& data)
+	{
+		uint32_t h{ 0x811C9DC5u };
+		for (unsigned char b : data) {
+			h ^= b;
+			h *= 0x01000193u;
+		}
+		return h;
+	}
+
+	//XOR是自身的逆运算，加密解密共用这一个
+	void xorPoolKey(std::vector<unsigned char>& data)
+	{
+		for (size_t i{ 0 }; i < data.size(); ++i)data[i] ^= kPoolKey[i % kPoolKeyLen];
+	}
+
+	std::vector<unsigned char> packWords(const std::vector<uint16_t>& words)
+	{
+		std::vector<unsigned char> out;
+		out.reserve(words.size() * 2);
+		for (uint16_t w : words) {
+			out.push_back(static_cast<unsigned char>(w & 0xFF));
+			out.push_back(static_cast<unsigned char>(w >> 8));
+		}
+		return out;
+	}
+
+	//[把池子编成base64分片]
+	//       非空，每片至多kPoolChunk字符
+	// 明文按小端拆字节 -> XOR -> 前面补4字节大端校验和 -> 整体base64 -> 切片
+	std::vector<std::string> encryptWords(const std::vector<uint16_t>& words)
+	{
+		std::vector<unsigned char> cipher{ packWords(words) };
+		xorPoolKey(cipher);
+		const uint32_t sum{ fnv1a32(cipher) };
+		std::vector<unsigned char> blob;
+		blob.reserve(cipher.size() + 4);
+		blob.push_back(static_cast<unsigned char>((sum >> 24) & 0xFF));
+		blob.push_back(static_cast<unsigned char>((sum >> 16) & 0xFF));
+		blob.push_back(static_cast<unsigned char>((sum >> 8) & 0xFF));
+		blob.push_back(static_cast<unsigned char>(sum & 0xFF));
+		blob.insert(blob.end(), cipher.begin(), cipher.end());
+
+		const std::string text{ base64_encode(std::string{ blob.begin(), blob.end() }) };
+		std::vector<std::string> chunks;
+		for (size_t i{ 0 }; i < text.size(); i += kPoolChunk)chunks.push_back(text.substr(i, kPoolChunk));
+		return chunks;
+	}
+
+	//[把base64分片还原成池子]
+	//      false                       true
+	// 长度或校验和任一不符 -> 丢弃     words被覆盖为解出的明文
+	//校验和是这里唯一的把关者：base64_decode遇到字母表外的字符会静默截断，不能指望它报错
+	bool decryptWords(const std::vector<std::string>& chunks, std::vector<uint16_t>& words)
+	{
+		std::string text;
+		for (const auto& chunk : chunks)text += chunk;
+		const std::string raw{ base64_decode(text) };
+		if (raw.size() < 6 || (raw.size() - 4) % 2 != 0)return false;   // 状态：长度不成立，直接判废
+		const std::vector<unsigned char> blob{ raw.begin(), raw.end() };
+		std::vector<unsigned char> cipher{ blob.begin() + 4, blob.end() };
+		const uint32_t stored{ static_cast<uint32_t>(blob[0]) << 24 | static_cast<uint32_t>(blob[1]) << 16
+			| static_cast<uint32_t>(blob[2]) << 8 | static_cast<uint32_t>(blob[3]) };
+		//改坏一个字符要么动到密文、要么动到校验和，两边对不上就宁可重新去取数
+		if (fnv1a32(cipher) != stored)return false;                     // 状态：校验和不符，当没这个池
+		xorPoolKey(cipher);
+		std::vector<uint16_t> loaded;
+		loaded.reserve(cipher.size() / 2);
+		for (size_t i{ 0 }; i < cipher.size(); i += 2)
+			loaded.push_back(static_cast<uint16_t>(cipher[i] | static_cast<uint16_t>(cipher[i + 1]) << 8));
+		words = std::move(loaded);
+		return true;
+	}
+
 	//读取落盘的池。文件缺失、损坏或内容不合法时返回false且不改动输出
 	bool readPool(const std::filesystem::path& file, std::vector<uint16_t>& words, uint64_t& bitBuf, int& bitCnt)
 	{
@@ -309,17 +396,17 @@ namespace
 			std::ifstream fin{ file, std::ios::binary };
 			if (!fin)return false;
 			const nlohmann::json j{ nlohmann::json::parse(fin) };
-			if (j.at("version").get<int>() != 1)return false;
+			if (j.at("version").get<int>() != kPoolVersion)return false;
 			const int cnt{ j.at("bitCnt").get<int>() };
 			const uint64_t buf{ j.at("bitBuf").get<uint64_t>() };
 			//取用后零散位总是少于一个整字
 			if (cnt < 0 || cnt >= kWordBits || buf >= (uint64_t{ 1 } << cnt))return false;
-			std::vector<uint16_t> loaded;
+			std::vector<std::string> chunks;
 			for (const auto& item : j.at("words")) {
-				if (!item.is_number_unsigned() || item.get<uint64_t>() > static_cast<uint64_t>(kWordMax))return false;
-				loaded.push_back(item.get<uint16_t>());
+				if (!item.is_string())return false;
+				chunks.push_back(item.get<std::string>());
 			}
-			words = std::move(loaded);
+			if (!decryptWords(chunks, words))return false;
 			bitBuf = buf;
 			bitCnt = cnt;
 			return true;
@@ -383,10 +470,10 @@ namespace RandomGenerator
 			std::lock_guard lock{ p.mtx };
 			if (p.cacheFile.empty() || !p.dirty)return;
 			file = p.cacheFile;
-			j["version"] = 1;
+			j["version"] = kPoolVersion;
 			j["bitBuf"] = p.bitBuf;
 			j["bitCnt"] = p.bitCnt;
-			j["words"] = std::vector<uint16_t>(p.words.begin() + p.cursor, p.words.end());
+			j["words"] = encryptWords(std::vector<uint16_t>(p.words.begin() + p.cursor, p.words.end()));
 			p.dirty = false;
 		}
 		//先写临时文件再改名，崩溃时旧文件不会被写坏
@@ -399,7 +486,7 @@ namespace RandomGenerator
 		{
 			std::ofstream fout{ tmp, std::ios::binary | std::ios::trunc };
 			if (fout) {
-				fout << j.dump();
+				fout << j.dump(4);
 				fout.flush();
 				ok = static_cast<bool>(fout);
 			}
