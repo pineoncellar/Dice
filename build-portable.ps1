@@ -184,8 +184,8 @@ foreach ($dll in $diceDlls) { Copy-Item -LiteralPath $dll.FullName -Destination 
 New-Item -ItemType Directory -Force -Path (Join-Path $OutDir "data") | Out-Null
 
 # The config now lives where the DLLs are, so its ../output paths (the dev-tree layout) no
-# longer resolve: rewriting that one prefix is the whole adjustment. root_dir/state_dir keep
-# working because ../data still lands on <OutDir>\data.
+# longer resolve: rewriting that one prefix is the whole adjustment. root_dir keeps working
+# because ../data still lands on <OutDir>\data.
 try {
     $cfgText = [System.IO.File]::ReadAllText($toml, (New-Object System.Text.UTF8Encoding($false, $true)))
 }
