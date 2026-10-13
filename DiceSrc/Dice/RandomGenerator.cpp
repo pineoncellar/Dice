@@ -374,6 +374,9 @@ namespace
 		for (const auto& chunk : chunks)text += chunk;
 		const std::string raw{ base64_decode(text) };
 		if (raw.size() < 6 || (raw.size() - 4) % 2 != 0)return false;   // 状态：长度不成立，直接判废
+		//非规范编码一律判废：base64_decode 遇到字母表外的字符会静默停下，尾部塞杂字符照样解出正确内容、
+		//校验和也照样对得上，只有"解码结果必须能原样编码回去"拦得住
+		if (base64_encode(raw) != text)return false;
 		const std::vector<unsigned char> blob{ raw.begin(), raw.end() };
 		std::vector<unsigned char> cipher{ blob.begin() + 4, blob.end() };
 		const uint32_t stored{ static_cast<uint32_t>(blob[0]) << 24 | static_cast<uint32_t>(blob[1]) << 16
@@ -396,13 +399,16 @@ namespace
 			std::ifstream fin{ file, std::ios::binary };
 			if (!fin)return false;
 			const nlohmann::json j{ nlohmann::json::parse(fin) };
-			if (j.at("version").get<int>() != kPoolVersion)return false;
+			//is_number_integer 先挡住 2.5 这类小数：get<int>() 会把它截成 2 蒙混过关
+			if (!j.at("version").is_number_integer() || j.at("version").get<int>() != kPoolVersion)return false;
 			const int cnt{ j.at("bitCnt").get<int>() };
 			const uint64_t buf{ j.at("bitBuf").get<uint64_t>() };
 			//取用后零散位总是少于一个整字
 			if (cnt < 0 || cnt >= kWordBits || buf >= (uint64_t{ 1 } << cnt))return false;
+			const auto& jWords{ j.at("words") };
+			if (!jWords.is_array())return false;
 			std::vector<std::string> chunks;
-			for (const auto& item : j.at("words")) {
+			for (const auto& item : jWords) {
 				if (!item.is_string())return false;
 				chunks.push_back(item.get<std::string>());
 			}

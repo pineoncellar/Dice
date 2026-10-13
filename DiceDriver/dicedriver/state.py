@@ -139,13 +139,14 @@ class State:
             raw = _read_json(self.dir / "last_speak.json")
             self._last_speak.update({int(gid): {int(u): int(t) for u, t in users.items()}
                                      for gid, users in raw.items()})
-        except (AttributeError, TypeError, ValueError) as e:
-            # a hand-edited file must cost us the table, not the startup
+        except (AttributeError, OverflowError, TypeError, ValueError) as e:
+            # a hand-edited file must cost us the table, not the startup. OverflowError is in the
+            # list because json reads 1e999 as inf and int(inf) raises it, not a ValueError.
             log.warning("last_speak.json unreadable, keeping what we have: %s", e)
         try:
             raw = _read_json(self.dir / "whole_ban.json")
             self._whole_ban.update({int(g): float(t) for g, t in raw.items()})
-        except (AttributeError, TypeError, ValueError) as e:
+        except (AttributeError, OverflowError, TypeError, ValueError) as e:
             log.warning("whole_ban.json unreadable, keeping what we have: %s", e)
         log.info("state loaded: last_speak groups=%d, pending whole-bans=%d",
                  len(self._last_speak), len(self._whole_ban))

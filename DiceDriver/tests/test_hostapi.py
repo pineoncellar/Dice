@@ -374,3 +374,13 @@ def test_malformed_state_file_does_not_break_bind(tmp_path):
     st = State(FakeBot(), config.from_dict({}, tmp_path).cache, Clock())
     st.bind(d)                                  # 不得抛异常
     assert st.last_speak(9, 2) == -1
+
+
+def test_absurd_number_in_state_file_does_not_break_bind(tmp_path):
+    d = tmp_path / "user"
+    d.mkdir()
+    # 1e999 被 json 读成 inf，int(inf) 抛的是 OverflowError，不属于 ValueError 那一族
+    (d / "last_speak.json").write_text('{"9": {"2": 1e999}}', encoding="utf-8")
+    st = State(FakeBot(), config.from_dict({}, tmp_path).cache, Clock())
+    st.bind(d)                                  # 同样不得抛异常
+    assert st.last_speak(9, 2) == -1

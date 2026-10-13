@@ -46,3 +46,10 @@ def test_bit_buffer_validation():
     for bit_cnt, bit_buf in ((16, 0), (-1, 0), (9, 0x200), (0, 1)):
         doc = dict(good, bitCnt=bit_cnt, bitBuf=bit_buf)
         assert decode_pool(json.dumps(doc)) is None, (bit_cnt, bit_buf)
+
+
+def test_trailing_junk_is_rejected():
+    # 尾部塞上字母表外的字符：解出来仍是完整正确的内容，靠校验和拦不住，只能靠"能不能原样编码回去"
+    doc = json.loads(encode_pool(WORDS, 0, 0))
+    doc["words"][-1] += "!!!!"
+    assert decode_pool(json.dumps(doc)) is None
