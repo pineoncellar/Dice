@@ -33,12 +33,13 @@ logs/                   运行日志（dicedriver.log 与 dice-<QQ>.log）
 |---|---|
 | `<工作区>\output\` | 编译产物：`w4123.Dice.windows.amd64.dll`、`dd_shim.dll` |
 | `<工作区>\build\` | 中间产物（CMake、对象文件、vcpkg 缓存与日志） |
-| `<工作区>\data\` | Dice 数据目录（`Dice<QQ>\`）与驱动状态（最后发言表、禁言到期表） |
+| `<工作区>\data\` | Dice 数据目录（`Dice<QQ>\`），最后发言表与禁言到期表在其中 `Dice<QQ>\user\` |
 | `<工作区>\*.bat` | `build-dicedriver.bat`（构建本目录）、`start-dicedriver.bat`（启动） |
 | `<工作区>\build-portable.ps1` | 组装便携包：把本目录 + 两份 DLL + 一份 embeddable CPython 打成一个能拷到**没有开发环境**的机器上直接跑的目录（详见下节） |
 
 路径关系写在 `dicedriver.toml` 里（都是相对本文件的路径）：`dice_dll` 与 `shim_dll` 指向
-`../output`，`root_dir` 与 `state_dir` 指向 `../data`，日志仍留在本目录的 `logs/`。
+`../output`，`root_dir` 指向 `../data`，日志仍留在本目录的 `logs/`。状态文件的位置不用配，
+固定跟着 `root_dir` 走：`<root_dir>\Dice<QQ>\user\`（`Dice<QQ>` 由 Dice 自己创建，驱动不会替它建）。
 
 为什么需要垫片：Dice 的宿主接口是 C++ ABI（`const std::string&`、`const std::set<long long>&`、
 `unordered_map<string, void*>`），Python/ctypes 造不出这些对象，所以由一个与 Dice 同工具链同 CRT 的

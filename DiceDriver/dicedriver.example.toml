@@ -6,7 +6,6 @@ bot_qq        = 0                                       # 0 = 以 OneBot 连接�
 dice_dll      = "../output/w4123.Dice.windows.amd64.dll" # 由 根目录\build-dicesrc.bat 生成
 shim_dll      = "../output/dd_shim.dll"                 # 由 根目录\build-dicedriver.bat 生成
 root_dir      = "../data"                               # Dice 在其下建 Dice<QQ>/；须能用 ANSI 代码页表示（避免中文路径）
-state_dir     = "../data/driver-state"                  # 最后发言表、全员禁言到期表
 pool_size     = 16                                      # 调用 Dice 的工作线程数
 startup_timeout_s = 60
 

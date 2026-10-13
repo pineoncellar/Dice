@@ -75,3 +75,16 @@ def test_example_config_loads(tmp_path):
     assert cfg.resolve(cfg.driver.dice_dll).parent == workspace / "output"
     assert cfg.resolve(cfg.driver.root_dir) == workspace / "data"
     assert cfg.resolve("x").parent == example.parent
+
+
+# --------------------------------------------- state_dir 已由 root_dir + Dice<QQ> 推出
+
+def test_driver_config_has_no_state_dir():
+    cfg = config.from_dict({}, config.Path("."))
+    assert not hasattr(cfg.driver, "state_dir")
+
+
+def test_state_dir_reports_a_removal_hint():
+    with pytest.raises(config.ConfigError) as e:
+        config.from_dict({"driver": {"state_dir": "../data/driver-state"}}, config.Path("."))
+    assert "state_dir" in str(e.value) and "user" in str(e.value)

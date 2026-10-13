@@ -32,7 +32,6 @@ def _launch(work, port, token=""):
 dice_dll = '{DICE_DLL}'
 shim_dll = '{SHIM}'
 root_dir = '{work / "data"}'
-state_dir = '{work / "state"}'
 
 [onebot]
 mode = "reverse"

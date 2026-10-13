@@ -19,7 +19,6 @@ class DriverCfg:
     dice_dll: str = "../output/w4123.Dice.windows.amd64.dll"
     shim_dll: str = "../output/dd_shim.dll"
     root_dir: str = "../data"  # Dice creates <root_dir>/Dice<QQ>/ ; must be ANSI-code-page safe
-    state_dir: str = "../data/driver-state"
     pool_size: int = 16  # worker threads that call into Dice
     startup_timeout_s: int = 60
 
@@ -196,6 +195,11 @@ def from_dict(raw: dict[str, Any], base_dir: Path) -> Config:
             raise ConfigError(f"unknown section: [{name}]")
         if not isinstance(value, dict):
             raise ConfigError(f"[{name}] must be a table")
+        # state_dir 已经由 root_dir + 登录号推出。留一个键位会让老配置静默指向旧目录，
+        # 比直接报错糟得多，所以这里换成一条能照着做的提示
+        if name == "driver" and "state_dir" in value:
+            raise ConfigError(
+                "[driver] state_dir 已移除：状态文件固定在 <root_dir>\\Dice<QQ>\\user\\ 下，请删掉这一行")
         setattr(cfg, name, _fill(name, _SECTIONS[name], value))
     validate(cfg)
     return cfg

@@ -33,7 +33,6 @@ def test_admin_reload_restarts_the_driver_process(tmp_path):
 dice_dll = '{DICE_DLL}'
 shim_dll = '{SHIM}'
 root_dir = '{tmp_path / "data"}'
-state_dir = '{tmp_path / "state"}'
 
 [onebot]
 url = "ws://127.0.0.1:{fake.port}"

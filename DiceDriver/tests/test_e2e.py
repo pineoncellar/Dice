@@ -39,7 +39,6 @@ def session(tmp_path_factory):
 dice_dll = '{DICE_DLL}'
 shim_dll = '{SHIM}'
 root_dir = '{work / "data"}'
-state_dir = '{work / "state"}'
 
 [onebot]
 mode = "forward"
