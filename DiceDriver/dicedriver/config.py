@@ -70,6 +70,13 @@ class LogCfg:
     max_size_mb: int = 64
     files: int = 10
     console: bool = True
+    # Crash forensics: these files exist so that a dying process still leaves evidence behind.
+    crash_file: str = "logs/crash.log"  # faulthandler dumps + uncaught exceptions (incl. native faults)
+    stderr_file: str = "logs/stderr.log"  # stderr/stdout copy; "" turns the copy off
+    journal_file: str = "logs/journal.log"  # synchronous copy of >=info records, written before the queue
+    alive_file: str = "logs/alive.json"  # liveness file; the supervisor judges a stall by its age
+    liveness_s: float = 30.0  # seconds between liveness lines; 0 turns them off
+    stall_s: float = 180.0  # no tick for this long -> dump every thread stack; 0 turns it off
 
 
 @dataclass
@@ -165,6 +172,8 @@ def validate(cfg: Config) -> None:
         raise ConfigError("[onebot] path must start with /")
     if cfg.log.level.lower() not in ("trace", "debug", "info", "warn", "warning", "error"):
         raise ConfigError("[log] level must be trace/debug/info/warn/error")
+    if cfg.log.liveness_s < 0 or cfg.log.stall_s < 0:
+        raise ConfigError("[log] liveness_s and stall_s must be >= 0")
     if cfg.notify.mode not in ("off", "console", "private", "group"):
         raise ConfigError("[notify] mode must be off/console/private/group")
     if cfg.notify.mode in ("private", "group") and not cfg.notify.targets:

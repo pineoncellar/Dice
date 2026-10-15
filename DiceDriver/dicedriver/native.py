@@ -7,7 +7,7 @@ import logging
 from ctypes import c_char_p, c_int, c_longlong, c_void_p
 from pathlib import Path
 
-from . import logs
+from . import crashguard, logs
 from .hostapi import DROPPED, HostApi
 
 log = logging.getLogger("dd.native")
@@ -102,6 +102,7 @@ class DiceNative:
     def _dispatch(self, api_id, ints_ptr, n, text, out, cap):
         try:
             name = self._names[api_id]
+            crashguard.breadcrumb(f"api {name}")
             ints = tuple(ints_ptr[i] for i in range(n))
             result = self.api.dispatch(name, ints, text or b"")
             data = result.out
@@ -140,6 +141,7 @@ class DiceNative:
         if fn is None:
             return 0
         enc = [a.encode("utf-8") if isinstance(a, str) else a for a in args]
+        crashguard.breadcrumb(f"event {name}")
         logs.trace(log, "event> %s%s", name, args)
         ret = fn(*enc)
         logs.trace(log, "event< %s -> %s", name, ret)

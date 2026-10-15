@@ -13,7 +13,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from . import logs
+from . import crashguard, logs
 from .bridge import RelayBridge, WindowGate
 from .config import Config
 from .events import EventRouter
@@ -80,6 +80,12 @@ class App:
         time.sleep(2.0)  # let Dice's own confirmation message leave first
         if reason == "reload":  # Remake: Dice already stopped itself and backed up its data
             self._stop_dice(timeout=15)
+        if os.environ.get(crashguard.SUPERVISED_ENV):
+            # Under a supervisor there is exactly one authority that spawns processes, so ask it
+            # instead of forking a replacement that nobody would be watching.
+            log.warning("asking the supervisor to restart the driver (%s)", reason)
+            self._finish(crashguard.RESTART_EXIT_CODE)
+            return
         log.warning("starting replacement process (%s)", reason)
         cmd = [sys.executable, "-m", "dicedriver", "--config", str(self.config_path),
                "--wait-pid", str(os.getpid())]
@@ -112,18 +118,21 @@ class App:
 
     def _finish(self, code: int) -> None:
         """Flush everything and terminate the process; Dice's detached threads would block a normal exit."""
-        log.info("driver exiting (code %d)", code)
+        log.info("driver exiting (code %d: %s)", code, crashguard.decode_exit_code(code))
         try:
             self.state.flush(force=True)
             self.notifier.stop()
             self.heartbeat.stop()
         finally:
+            crashguard.note_shutdown(code)
             logs.shutdown()
+            crashguard.stop()
             os._exit(code)
 
     # ------------------------------------------------------------------ OneBot link callbacks
 
     def _on_event(self, ev: dict) -> None:
+        crashguard.note_event(f"{ev.get('post_type')}/{ev.get('message_type') or ev.get('notice_type') or ev.get('meta_event_type') or ''}")
         self.router.on_event(ev)
         if self.bridge is not None:
             self.bridge.relay_event(ev)
@@ -182,6 +191,7 @@ class App:
 
     def _maintenance(self) -> None:
         while not self._stopping.wait(1.0):
+            crashguard.tick("maintenance")
             if not self.link.connected:
                 continue
             try:
@@ -215,6 +225,7 @@ class App:
 
         link_task = asyncio.create_task(self.link.run())
         stop_task = asyncio.create_task(self._stop.wait())
+        ticker = asyncio.create_task(self._ticker())
         waiting = {link_task, stop_task}
         bridge_task = None
         if self.bridge is not None:
@@ -227,6 +238,7 @@ class App:
             self._exit_code = self._exit_code or 1
         await self.link.close()
         link_task.cancel()
+        ticker.cancel()
         if self.bridge is not None:
             await self.bridge.close()
             bridge_task.cancel()
@@ -235,6 +247,12 @@ class App:
             log.info("stopping Dice")
             await asyncio.get_running_loop().run_in_executor(None, self._stop_dice, 20)
         return self._exit_code
+
+    async def _ticker(self) -> None:
+        """A clock the watchdog can trust: it stops when the event loop stops, which is the point."""
+        while True:
+            crashguard.tick("eventloop")
+            await asyncio.sleep(1.0)
 
     async def _run_bridge(self) -> None:
         """The relay is a side feature: if it cannot serve, the driver must still run."""

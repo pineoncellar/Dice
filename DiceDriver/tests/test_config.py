@@ -77,6 +77,16 @@ def test_example_config_loads(tmp_path):
     assert cfg.resolve("x").parent == example.parent
 
 
+def test_forensics_defaults_and_validation():
+    cfg = config.from_dict({}, config.Path("."))
+    assert cfg.log.crash_file.endswith("crash.log") and cfg.log.alive_file.endswith("alive.json")
+    assert cfg.log.liveness_s == 30.0 and cfg.log.stall_s == 180.0
+    with pytest.raises(config.ConfigError, match="stall_s"):
+        config.from_dict({"log": {"stall_s": -1}}, config.Path("."))
+    with pytest.raises(config.ConfigError, match="liveness_s"):
+        config.from_dict({"log": {"liveness_s": -0.5}}, config.Path("."))
+
+
 # --------------------------------------------- state_dir 已由 root_dir + Dice<QQ> 推出
 
 def test_driver_config_has_no_state_dir():

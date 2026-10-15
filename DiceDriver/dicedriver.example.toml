@@ -49,6 +49,14 @@ max_size_mb   = 64
 files         = 10
 console       = true
 
+# 崩溃取证：进程无论怎么死，都要留下能看的文件（详见 README「崩溃取证与自动恢复」）
+crash_file    = "logs/crash.log"                          # 原生崩溃/未捕获异常/卡死的线程栈
+stderr_file   = "logs/stderr.log"                         # stderr/stdout 的副本（traceback、abort 文本）；"" = 关闭
+journal_file  = "logs/journal.log"                        # info 及以上同步落盘，不受异步队列丢失影响
+alive_file    = "logs/alive.json"                         # 存活心跳，supervisor 靠它判断卡死
+liveness_s    = 30                                        # 心跳文件刷新间隔（秒），0 = 关闭
+stall_s       = 180                                       # 没有任何 tick 超过这么久就 dump 全部线程栈，0 = 关闭
+
 [notify]                                                # 对应 DebugMsg
 mode          = "console"                               # off | console | private | group
 targets       = []                                      # private=QQ 号，group=群号，可多个

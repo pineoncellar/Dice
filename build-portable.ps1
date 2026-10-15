@@ -160,6 +160,18 @@ if (Test-Path -LiteralPath $OutDir) {
         throw "$OutDir already exists. Pass -Force to replace it, or pick another -OutDir."
     }
     Write-Host "cleaning   : $OutDir"
+    # Logs and Dice data live inside the bundle, so -Force can delete the only copy of them.
+    $doomed = @()
+    foreach ($rel in @("Diceki\logs", "DiceDriver\logs", "data")) {
+        $p = Join-Path $OutDir $rel
+        if (Test-Path -LiteralPath $p) {
+            $files = @(Get-ChildItem -LiteralPath $p -Recurse -Force -File -ErrorAction SilentlyContinue)
+            if ($files.Count) { $doomed += ("{0} ({1} files)" -f $p, $files.Count) }
+        }
+    }
+    if ($doomed.Count) {
+        Write-Warning ("-Force is about to delete logs/data inside $OutDir`: `n  " + ($doomed -join "`n  ") + "`n  Copy anything you want to keep outside that directory first.")
+    }
     Remove-Item -LiteralPath $OutDir -Recurse -Force
 }
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
@@ -227,7 +239,9 @@ $launcher = @'
 @echo off
 rem Portable launcher: runs DiceDriver on the bundled embeddable Python.
 rem No system Python, no venv and no development tools are required.
-rem Stop it with Ctrl+C in this window.
+rem It runs the driver under the supervisor, so every exit lands in Diceki\logs\supervisor.log,
+rem a crash gets an incident report, and a driver that dies is restarted instead of staying dead.
+rem Stop it with Ctrl+C in this window (the supervisor does not restart a clean stop).
 setlocal
 title DiceDriver (portable)
 cd /d "%~dp0DiceDriver"
@@ -242,16 +256,19 @@ if not exist "%~dp0Diceki\dicedriver.toml" (
     pause
     exit /b 1
 )
+if not exist "%~dp0Diceki\logs" mkdir "%~dp0Diceki\logs"
 
-echo Starting DiceDriver ... press Ctrl+C to stop.
+echo Starting DiceDriver under the supervisor ... press Ctrl+C to stop.
 echo   python : %~dp0runtime\python.exe
 echo   config : %~dp0Diceki\dicedriver.toml
-echo   logs   : %~dp0Diceki\logs
+echo   logs   : %~dp0Diceki\logs  (dicedriver.log, crash.log, supervisor.log, incidents\)
 echo   data   : %~dp0data
-"%~dp0runtime\python.exe" -m dicedriver --config "%~dp0Diceki\dicedriver.toml" %*
+"%~dp0runtime\python.exe" -m dicedriver --config "%~dp0Diceki\dicedriver.toml" --supervise %*
 
 echo.
-echo DiceDriver exited with errorlevel %errorlevel%.
+echo DiceDriver stopped with errorlevel %errorlevel%.
+>> "%~dp0Diceki\logs\launcher.log" echo %date% %time% DiceDriver stopped with errorlevel %errorlevel%
+echo Press any key to close this window - the driver has already stopped, this is not a hang.
 pause
 exit /b %errorlevel%
 '@
@@ -293,6 +310,21 @@ Visual Studio、编译器或 VC++ 运行库。里面装的是一份 embeddable C
   - 64 位 Windows（x64 的 DLL 在 32 位系统上装不了）
   - 一个 OneBot 11 实现（NapCat / LLOneBot / Lagrange 等），驱动只是 Dice DLL 的宿主
   - 反向 WS 模式下要在防火墙上放通 dicedriver.toml 里配的监听端口
+
+崩溃取证与自动恢复
+------------------
+  启动脚本会让宿主跑在一个 supervisor 之下，所以"程序没了、日志也没了"这种情况不会再有：
+    Diceki\logs\supervisor.log    每次启动/退出/重启一行，带退出码与含义
+    Diceki\logs\incidents\        每次异常退出一份报告：退出码、存活状态、各取证文件尾部、
+                                  以及"下次怎么抓到原生 dump"的现成命令
+    Diceki\logs\crash.log         原生崩溃/未捕获异常/卡死的全部线程栈（进程内取证）
+    Diceki\logs\journal.log       info 及以上的同步副本，不受异步写队列影响
+    Diceki\logs\stderr.log        控制台文本的副本，窗口关了也还在
+    Diceki\logs\alive.json        存活心跳 + 最近操作，卡死与否看它的更新时间
+  行为：Ctrl+C 仍是优雅停止，不会重启；异常退出（含卡死被击杀）会记录、生成报告并自动重启，
+  重启上限 5 次 / 10 分钟，超了就打印 CRASH LOOP 停下。
+  想抓原生栈，按报告里给的 reg 命令开启 WER LocalDumps，崩后到 C:\dumps 取 .dmp。
+  细节见 DiceDriver\README.md 的「崩溃取证与自动恢复」。
 
 注意
 ----
