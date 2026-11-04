@@ -1,9 +1,18 @@
-"""ctypes bridge: loads dd_shim.dll (host API thunks) and the Dice DLL (event exports)."""
+"""ctypes bridge: loads dd_shim.dll (host API thunks) and the Dice DLL (event exports).
+
+Every call into the Dice DLL - events and lifecycle alike - runs on one dedicated thread. Dice
+writes global state without locks (e.g. `ChatList` in ManagerSystem.cpp), so two threads inside
+`eventGroupMsg` at once corrupts it: that is the access violation and the wedge this project hit.
+The host API direction stays as it is - Dice calls us from whichever of its own threads it likes.
+"""
 
 from __future__ import annotations
 
 import ctypes
 import logging
+import queue
+import threading
+import time
 from ctypes import c_char_p, c_int, c_longlong, c_void_p
 from pathlib import Path
 
@@ -36,6 +45,10 @@ def clamp_int32(v: int) -> int:
 
 
 class DiceNative:
+    # A single call taking longer than this gets logged while it is still running, so a wedged
+    # DLL shows up in the journal instead of only as a bot that stopped answering.
+    STUCK_WARN_S = 30.0
+
     def __init__(self, shim_path: Path, dice_dll_path: Path, api: HostApi):
         self.shim_path = shim_path
         self.dice_dll_path = dice_dll_path
@@ -45,6 +58,10 @@ class DiceNative:
         self._names: list[str] = []
         self._callback = None  # must stay referenced for the lifetime of the process
         self._events: dict[str, object] = {}
+        self._calls: queue.SimpleQueue = queue.SimpleQueue()
+        self._thread: threading.Thread | None = None
+        self._thread_ident = 0
+        self._thread_lock = threading.Lock()
 
     # ------------------------------------------------------------------ loading
 
@@ -97,6 +114,54 @@ class DiceNative:
             self._events[name] = fn
         self._dice = dice
 
+    # ------------------------------------------------------------------ the one thread allowed in
+
+    def _ensure_thread(self) -> None:
+        if self._thread is not None:
+            return
+        with self._thread_lock:
+            if self._thread is None:
+                thread = threading.Thread(target=self._run_calls, name="dd-dice", daemon=True)
+                thread.start()
+                self._thread = thread
+
+    def _run_calls(self) -> None:
+        self._thread_ident = threading.get_ident()
+        while True:
+            item = self._calls.get()
+            if item is None:
+                return
+            fn, box, done = item
+            try:
+                box.append(("ok", fn()))
+            except BaseException as e:
+                box.append(("err", e))
+            finally:
+                done.set()
+                crashguard.tick("dice")
+
+    def _call(self, what: str, fn):
+        """Run fn on the Dice thread and hand its outcome back to the caller.
+
+        Calls are strictly serialised in submission order, which is also what keeps Dice's
+        per-chat handling in order. A wedged call cannot be cancelled: it is reported every
+        STUCK_WARN_S seconds and the caller keeps waiting, so nothing else enters the DLL.
+        """
+        if threading.get_ident() == self._thread_ident:  # already inside: never queue behind self
+            return fn()
+        self._ensure_thread()
+        box: list = []
+        done = threading.Event()
+        self._calls.put((fn, box, done))
+        started = time.monotonic()
+        while not done.wait(self.STUCK_WARN_S):
+            log.error("%s has been running on the Dice thread for %.0fs; the DLL looks wedged",
+                      what, time.monotonic() - started)
+        kind, value = box[0]
+        if kind == "err":
+            raise value
+        return value
+
     # ------------------------------------------------------------------ host API callback
 
     def _dispatch(self, api_id, ints_ptr, n, text, out, cap):
@@ -124,15 +189,18 @@ class DiceNative:
     # ------------------------------------------------------------------ lifecycle
 
     def start(self, bot_qq: int) -> None:
-        getter = self._shim.dd_api_list_getter()
-        self._dice.eventStartUp(getter, bot_qq)
-        self._dice.eventEnable()
+        def run() -> None:
+            getter = self._shim.dd_api_list_getter()
+            self._dice.eventStartUp(getter, bot_qq)
+            self._dice.eventEnable()
+
+        self._call("eventStartUp", run)
 
     def disable(self) -> None:
-        self._dice.eventDisable()
+        self._call("eventDisable", self._dice.eventDisable)
 
     def exit(self) -> None:
-        self._dice.eventExit()
+        self._call("eventExit", self._dice.eventExit)
 
     # ------------------------------------------------------------------ events
 
@@ -143,6 +211,6 @@ class DiceNative:
         enc = [a.encode("utf-8") if isinstance(a, str) else a for a in args]
         crashguard.breadcrumb(f"event {name}")
         logs.trace(log, "event> %s%s", name, args)
-        ret = fn(*enc)
+        ret = self._call(f"event {name}", lambda: fn(*enc))
         logs.trace(log, "event< %s -> %s", name, ret)
         return ret

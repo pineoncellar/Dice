@@ -6,7 +6,7 @@ bot_qq        = 0                                       # 0 = 以 OneBot 连接�
 dice_dll      = "../output/w4123.Dice.windows.amd64.dll" # 由 根目录\build-dicesrc.bat 生成
 shim_dll      = "../output/dd_shim.dll"                 # 由 根目录\build-dicedriver.bat 生成
 root_dir      = "../data"                               # Dice 在其下建 Dice<QQ>/；须能用 ANSI 代码页表示（避免中文路径）
-pool_size     = 16                                      # 调用 Dice 的工作线程数
+pool_size     = 16                                      # 事件处理线程数（调用 Dice 一律走单一 dd-dice 线程）
 startup_timeout_s = 60
 
 [onebot]
@@ -55,7 +55,7 @@ stderr_file   = "logs/stderr.log"                         # stderr/stdout 的副
 journal_file  = "logs/journal.log"                        # info 及以上同步落盘，不受异步队列丢失影响
 alive_file    = "logs/alive.json"                         # 存活心跳，supervisor 靠它判断卡死
 liveness_s    = 30                                        # 心跳文件刷新间隔（秒），0 = 关闭
-stall_s       = 180                                       # 没有任何 tick 超过这么久就 dump 全部线程栈，0 = 关闭
+stall_s       = 60                                        # 没有任何 tick 超过这么久就 dump 全部线程栈，0 = 关闭
 
 [notify]                                                # 对应 DebugMsg
 mode          = "console"                               # off | console | private | group

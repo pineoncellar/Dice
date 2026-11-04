@@ -19,7 +19,7 @@ class DriverCfg:
     dice_dll: str = "../output/w4123.Dice.windows.amd64.dll"
     shim_dll: str = "../output/dd_shim.dll"
     root_dir: str = "../data"  # Dice creates <root_dir>/Dice<QQ>/ ; must be ANSI-code-page safe
-    pool_size: int = 16  # worker threads that call into Dice
+    pool_size: int = 16  # event handler threads; the DLL itself is entered from one thread only
     startup_timeout_s: int = 60
 
 
@@ -76,7 +76,7 @@ class LogCfg:
     journal_file: str = "logs/journal.log"  # synchronous copy of >=info records, written before the queue
     alive_file: str = "logs/alive.json"  # liveness file; the supervisor judges a stall by its age
     liveness_s: float = 30.0  # seconds between liveness lines; 0 turns them off
-    stall_s: float = 180.0  # no tick for this long -> dump every thread stack; 0 turns it off
+    stall_s: float = 60.0  # no tick for this long -> dump every thread stack; 0 turns it off
 
 
 @dataclass

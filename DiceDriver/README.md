@@ -18,8 +18,8 @@ dicedriver/
   bridge.py             OneBot 中转：给外部 bot（麦bot）的第二个 OB11 端点 + 跑团消息门控
   state.py              缓存与持久状态（成员/好友/昵称/最后发言/禁言到期/请求 flag）
   hostapi.py            39 个宿主接口的实现（纯 Python，可单测）
-  native.py             ctypes：加载垫片与 Dice DLL，派发回调、投递事件
-  events.py             OneBot 事件 -> Dice 的 eventXxx（按会话保序、工作线程池）
+  native.py             ctypes：加载垫片与 Dice DLL，派发回调、投递事件（进入 DLL 一律走单一 `dd-dice` 线程）
+  events.py             OneBot 事件 -> Dice 的 eventXxx（按会话保序、工作线程池；调用 Dice 已串行化）
   notify.py             DebugMsg 合并限流投递 / DiceHeartbeat 异步 POST
   app.py, __main__.py   装配、生命周期、Reload/Remake/Killme
   __init__.py           包版本号 __version__：.bot 回执里的驱动版本与打包版本都取自这里
@@ -189,7 +189,7 @@ Dice 是**进程内**加载的 C++ DLL（`ctypes.CDLL`）。它自己的线程�
   （要拿到 C++ 帧另见下面的 WER dump）。
 - `sys.excepthook` / `threading.excepthook` / `sys.unraisablehook` 都接到同一个文件，同时往主日志
   写一行 `critical` 摘要。
-- 看门狗线程：`[log] stall_s`（默认 180 秒）内**没有任何 tick**（事件循环与维护循环各自上报 tick）
+- 看门狗线程：`[log] stall_s`（默认 60 秒）内**没有任何 tick**（事件循环、维护循环与 `dd-dice` 线程各自上报 tick）
   就判定卡死，把全部线程栈 dump 进 `crash.log` 并刷新 `alive.json`。GIL 被死循环占住时看门狗
   自己也会停，那种情况由下面的 supervisor 收尸。
 - 每个 run 在 `crash.log` 里都有 `===== driver started =====` 与 `===== driver exiting =====`
@@ -253,6 +253,11 @@ python -m dicedriver --config Diceki\dicedriver.toml --supervise
 5. **`AnswerGroupInvited`**：`3`（忽略）按拒绝处理；只处理 `sub_type=invite`，主动入群申请(`add`)不交给 Dice。
 6. **Dice 启动前收到的事件会被丢弃**（debug 日志可见），重连不会重启 Dice。
 7. 失败的宿主接口调用一律返回文档约定的回退值（`IsXxx` → Dice 传入的 default、`GetGroupLastMsg` → -1、其余 0/空），异常不会越过 DLL 边界。
+8. **进入 Dice DLL 的调用一律串行化到单一 `dd-dice` 线程**（`native.py`），事件池只做取数、缓存、日志这类准备工作。
+   原因：Dice 的 `eventXxx` 不是线程安全的（`ManagerSystem.cpp` 的 `chat()` 无锁改写全局 `ChatList`，而调度器/Job/WebUI
+   线程同时在遍历它），16 线程并发调用会写坏容器——2026-10-23/27/31 三次 `eventGroupMsg` 里的
+   `access violation writing 0x8` 就是它；容器坏掉之后事件管线会整体停摆，表现为"进程没死、日志正常、骰娘不回话"。
+   按会话保序仍由 `events.py` 的 tail 链保证，串行化只是多了一层全序。
 
 ## 测试
 
