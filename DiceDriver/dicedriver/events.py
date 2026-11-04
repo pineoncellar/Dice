@@ -1,17 +1,41 @@
-"""OneBot 11 events -> Dice event exports (docs section 7). Handlers run on worker threads."""
+"""OneBot 11 events -> Dice event exports (docs section 7). Handlers run on worker threads.
+
+The workers do the bookkeeping; the calls into the DLL itself are serialised in native.py, because
+Dice writes global state without locks and must only ever be entered from one thread at a time.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from concurrent.futures import Executor
 from typing import Callable
 
+from . import logs
 from .cq import message_to_cq
 from .native import DiceNative, clamp_int32
 from .state import State
 
 log = logging.getLogger("dd.events")
+
+# Dice 判断"这是不是一条指令"的方式见 DiceSrc/Dice/MsgFormat.cpp 的 strip()：反复剥掉这些前缀。
+_COMMAND_PREFIXES = (".", "!", "。", "！", "．")
+
+# 指令原文进日志，但超长的（属性批量导入那种几百字）只留一个能认出来的头。
+_CMD_LOG_LIMIT = 300
+
+
+def command_of(text: str) -> str | None:
+    """指令原文；不是指令则返回 None。非指令的内容一律不写日志（隐私）。"""
+    stripped = text.lstrip()
+    return stripped if stripped[:1] in _COMMAND_PREFIXES else None
+
+
+def _clip(text: str) -> str:
+    if len(text) <= _CMD_LOG_LIMIT:
+        return text
+    return f"{text[:_CMD_LOG_LIMIT]}…(+{len(text) - _CMD_LOG_LIMIT}字)"
 
 
 class EventRouter:
@@ -82,17 +106,35 @@ class EventRouter:
         msg_id = clamp_int32(int(ev.get("message_id", 0)))
         kind = ev.get("message_type")
         if kind == "private":
-            log.debug("private message from %d (len=%d)", uid, len(text))
-            self.native.emit("eventPrivateMsg", msg_id, uid, text)
+            self._deliver("eventPrivateMsg", "私聊", uid, msg_id, text, (msg_id, uid, text))
         elif kind == "group":
             gid = int(ev["group_id"])
-            log.debug("group message in %d from %d (len=%d)", gid, uid, len(text))
             if gid not in self.state.group_ids():
                 self.state.group_added(gid)
             self.state.note_speak(gid, uid, int(ev.get("time") or 0))
-            self.native.emit("eventGroupMsg", msg_id, gid, uid, text)
+            self._deliver("eventGroupMsg", f"群{gid}", uid, msg_id, text, (msg_id, gid, uid, text))
         else:
-            log.debug("ignored message_type %r", kind)
+            log.debug("忽略 message_type=%r", kind)
+
+    def _deliver(self, name: str, where: str, uid: int, msg_id: int, text: str, args: tuple) -> None:
+        """把一条消息交给 Dice，并记下"它是什么"与"处理出了什么结果"。
+
+        指令原文进日志——否则事后没人分得清"指令失败"和"骰娘卡死"；普通聊天内容不进日志，
+        只留定位用的元信息，这样日志里不会残留别人的聊天记录。
+        """
+        cmd = command_of(text)
+        sent = self.native.api.sends
+        started = time.monotonic()
+        if cmd is None:
+            ret = self.native.emit(name, *args)
+            logs.trace(log, "%s ← 非指令 uid=%d msgid=%d len=%d ret=%d 用时 %.0fms（内容不记录）",
+                       where, uid, msg_id, len(text), ret, (time.monotonic() - started) * 1000)
+            return
+        shown = repr(_clip(cmd))
+        log.info("指令 %s | %s uid=%d msgid=%d", shown, where, uid, msg_id)
+        ret = self.native.emit(name, *args)
+        log.info("指令完成 %s | ret=%d 用时 %.0fms 回复 %d 条", shown, ret,
+                 (time.monotonic() - started) * 1000, self.native.api.sends - sent)
 
     def _notice(self, ev: dict) -> None:
         kind = ev.get("notice_type")
@@ -101,13 +143,14 @@ class EventRouter:
         uid = int(ev.get("user_id") or 0)
         operator = int(ev.get("operator_id") or 0)
         me = self.self_id()
-        log.debug("notice %s/%s group=%s user=%s operator=%s", kind, sub, gid, uid, operator)
+        where = f"{kind}/{sub if sub else '-'} 群={gid} 用户={uid} 操作者={operator}"
         if kind == "group_increase":
             if uid == me:
                 self.state.group_added(gid)
             else:
                 self.state.invalidate_members(gid)
             self.native.emit("eventGroupMemberAdd", gid, uid, operator)
+            done = "Dice: eventGroupMemberAdd"
         elif kind == "group_decrease":
             if uid == me:
                 self.state.group_removed(gid)
@@ -115,19 +158,26 @@ class EventRouter:
                 self.state.invalidate_members(gid)
             if sub in ("kick", "kick_me"):
                 self.native.emit("eventGroupMemberKicked", gid, uid, operator)
+                done = "Dice: eventGroupMemberKicked"
+            else:
+                done = "仅更新成员缓存"
         elif kind == "group_ban":
             if not uid:
-                log.info("whole-group ban notice in %d (%s); no Dice event for it", gid, sub)
+                log.info("通知 %s → 全员禁言，Dice 无对应事件", where)
                 return
             duration = str(int(ev.get("duration") or 0)) if sub == "ban" else ""
             self.native.emit("eventGroupBan", gid, uid, operator, duration)
+            done = "Dice: eventGroupBan"
         elif kind == "friend_add":
             self.state.invalidate_friends()
             self.native.emit("eventFriendAdd", uid)
+            done = "Dice: eventFriendAdd"
         elif kind in ("group_admin", "group_card"):
             self.state.invalidate_members(gid)
+            done = "仅更新成员缓存"
         else:
-            log.debug("notice %s ignored", kind)
+            done = "忽略"
+        log.debug("通知 %s → %s", where, done)
 
     def _request(self, ev: dict) -> None:
         kind = ev.get("request_type")

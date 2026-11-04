@@ -165,6 +165,27 @@ powershell -ExecutionPolicy Bypass -File build-portable.ps1 -Zip   :: 另出 por
 
 不用"连 `.venv` 一起拷"：venv 不可重定位，`pyvenv.cfg` 里记着创建时解释器的绝对路径。可选参数见脚本头部注释与 `DiceSrc/docs/使用文档.md` §4.2。
 
+## 日志怎么读（排障顺序）
+
+一条**指令**的完整足迹长这样（`[log] level = "debug"`）：
+
+```
+… [dd.events] 指令 '.sn 一条林' | 群1108103874 uid=3310587585 msgid=668273062
+… [dd.api]    SendGroupMsg(3512535506, 1108103874, '…') -> ret=0 0.0ms
+… [dd.onebot] SendGroupMsg(to=1108103874, len=19) ok
+… [dd.events] 指令完成 '.sn 一条林' | ret=0 用时 12ms 回复 1 条
+```
+
+- 只有 `指令`、没有 `指令完成`：**Dice 卡在那条指令里**（本项目遇到的卡死就是这个形状）。
+  30 秒后会开始出现 `[dd.native] event … has been running on the Dice thread for 30s`。
+- `指令完成 … 回复 0 条`：Dice 认为这条不需要回（开关关闭、静默、没匹配上），不是故障。
+- `[dd.api]` 是 Dice 调宿主的每一笔（发送、查询、改名片…），`-> ret=` 是给它的返回值；
+  超过 500ms 的会直接升到 warning。
+- **非指令**消息只在 trace 记一行（群、用户、消息号、长度、用时），**内容不落盘**——debug 里看不到它们；
+  指令以 `.` `!` `。` `！` `．` 开头（与 Dice 的 `strip()` 同规则），原文进日志，超过 300 字截断。
+- 级别分工：`info` = 生命周期 + 每条指令与结果 + 警告；`debug` = 指令、宿主调用、事件与心跳；
+  `trace` = 非指令消息、查询类宿主调用、OneBot action 往返。
+
 ## 崩溃取证与自动恢复：让"什么都没留下"不可能发生
 
 Dice 是**进程内**加载的 C++ DLL（`ctypes.CDLL`）。它自己的线程里一旦出现访问冲突、堆损坏或

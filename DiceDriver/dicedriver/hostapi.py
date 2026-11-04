@@ -56,6 +56,7 @@ class HostApi:
         self.heartbeat = heartbeat
         self.lifecycle = lifecycle
         self.gate = gate
+        self.sends = 0  # messages Dice asked us to deliver; events.py reports it as the reply count
 
     # ------------------------------------------------------------------ dispatch
 
@@ -219,6 +220,7 @@ class HostApi:
         _, to = a
         if not s:
             return
+        self.sends += 1
         self.bot.call_nowait("send_private_msg", {"user_id": to, "message": self._pack_message(s)},
                              f"SendPrivateMsg(to={to}, len={len(s)})")
 
@@ -226,6 +228,7 @@ class HostApi:
         _, to = a
         if not s:
             return
+        self.sends += 1
         self.bot.call_nowait("send_group_msg", {"group_id": to, "message": self._pack_message(s)},
                              f"SendGroupMsg(to={to}, len={len(s)})")
 
