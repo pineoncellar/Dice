@@ -249,9 +249,27 @@ python -m dicedriver --config Diceki\dicedriver.toml --supervise
 1. `logs/supervisor.log` 最后几行：退出码 + 含义 + 报告文件名。
 2. `logs/incidents/incident-*.txt`：退出码、运行时长、所有取证文件尾部。
 3. `logs/crash.log`：出现 `Windows fatal exception` 就是原生崩溃；出现 `STALL` 就是卡死。
-4. 要定位到 C++ 帧，得有一份原生 dump：按报告里的命令注册 WER LocalDumps，崩后取
-   `C:\dumps\python.exe.*.dmp` 用 WinDbg 打开；同一时刻 `Application` 事件日志里的 Event ID 1000
-   还会记下出错模块与偏移。
+4. 要定位到 C++ 帧，得有一份原生 dump：跑一次 `enable-wer-dumps.ps1`（管理员 shell，见下）注册
+   WER LocalDumps，崩后取 `<dump 目录>\python.exe.*.dmp` 用 WinDbg 打开；同一时刻 `Application`
+   事件日志里的 Event ID 1000 还会记下出错模块与偏移。
+
+### 抓原生栈：`enable-wer-dumps.ps1`
+
+```powershell
+powershell -ExecutionPolicy Bypass -File DiceDriver\enable-wer-dumps.ps1              # C:\dumps，完整 dump
+powershell -ExecutionPolicy Bypass -File DiceDriver\enable-wer-dumps.ps1 -DumpType 1  # 只要线程栈，小得多
+powershell -ExecutionPolicy Bypass -File DiceDriver\enable-wer-dumps.ps1 -Query       # 现在设成了什么
+powershell -ExecutionPolicy Bypass -File DiceDriver\enable-wer-dumps.ps1 -Disable     # 抓完就撤掉
+```
+
+写的是 `HKLM\…\Windows Error Reporting\LocalDumps\python.exe`（`-ImageName` 可换，空字符串 = 全机）。
+WER 是在**崩溃发生时**才读这些键的，所以正在跑的进程也被覆盖，不用重启；反过来它跨重启一直有效，
+抓到之后记得 `-Disable`。`crash.log` 里没有 `Current thread` 行的那种崩溃，出错线程根本不在 Python
+里，`~*k`（全部线程栈）才是唯一线索：
+
+```powershell
+cdb -z C:\dumps\python.exe.*.dmp -c ".ecxr; kb; ~*k; lmvm w4123*; q"
+```
 
 ### 一个已经存在的好消息
 
